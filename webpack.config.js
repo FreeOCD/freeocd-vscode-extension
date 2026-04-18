@@ -17,10 +17,9 @@ const packageJson = require('./package.json');
  *
  * Static assets (DAPjs UMD bundle, icons, target definitions, walkthrough
  * markdown) are copied to the output directory via CopyWebpackPlugin.
- *
- * @type {import('webpack').Configuration[]}
  */
 
+/** @type {import('webpack').Configuration} */
 const extensionConfig = {
   target: 'node',
   mode: 'none',
@@ -67,6 +66,7 @@ const extensionConfig = {
   }
 };
 
+/** @type {import('webpack').Configuration} */
 const mcpServerConfig = {
   target: 'node',
   mode: 'none',
