@@ -198,6 +198,11 @@
           "maximum": 5000,
           "description": "%config.rtt.pollingInterval%"
         },
+        "freeocd.rtt.autoOpenTerminal": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.rtt.autoOpenTerminal%"
+        },
         "freeocd.mcp.enabled": {
           "type": "boolean",
           "default": true,

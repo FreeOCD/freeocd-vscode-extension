@@ -456,6 +456,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         );
         debuggerTree.refresh();
         publishStatus();
+
+        if (config.get<boolean>('rtt.autoOpenTerminal', true)) {
+          await vscode.commands.executeCommand('freeocd.openRttTerminal');
+        }
       } catch (err) {
         handleError(err);
       }

@@ -29,6 +29,7 @@
   "config.rtt.scanStart": "RTT control block scan start address (hex).",
   "config.rtt.scanRange": "RTT control block scan range in bytes (hex).",
   "config.rtt.pollingInterval": "RTT read polling interval in milliseconds.",
+  "config.rtt.autoOpenTerminal": "Automatically open RTT terminal when RTT is connected.",
   "config.mcp.enabled": "Enable the bundled MCP server and command bridge for AI tools.",
   "config.mcp.sessionLogSize": "Maximum number of command entries retained in the MCP session log.",
   "config.log.level": "Log level for the FreeOCD output channel.",

@@ -29,6 +29,7 @@
   "config.rtt.scanStart": "RTT 制御ブロックの走査開始アドレス (16進数)。",
   "config.rtt.scanRange": "RTT 制御ブロックの走査範囲 (バイト単位、16進数)。",
   "config.rtt.pollingInterval": "RTT 読み取りのポーリング間隔 (ミリ秒)。",
+  "config.rtt.autoOpenTerminal": "RTT 接続時にターミナルを自動的に開く。",
   "config.mcp.enabled": "AI ツール向けの MCP サーバー・コマンドブリッジを有効化します。",
   "config.mcp.sessionLogSize": "MCP セッションログに保持する最大コマンド数。",
   "config.log.level": "FreeOCD 出力チャネルのログレベル。",
