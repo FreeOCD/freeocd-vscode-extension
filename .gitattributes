@@ -1,0 +1,13 @@
+# Enforce LF line endings for all text files in this repository and its
+# submodules on all platforms (including Windows with core.autocrlf=true).
+# This prevents DAPjs's ESLint linebreak-style rule from failing on Windows
+# runners where git would otherwise convert LF -> CRLF on checkout.
+* text=auto eol=lf
+
+# Binary files — never convert.
+*.node binary
+*.png  binary
+*.svg  binary
+*.ico  binary
+*.vsix binary
+*.zip  binary

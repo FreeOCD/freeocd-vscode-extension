@@ -1,0 +1,61 @@
+name: New MCU support request
+description: Request or contribute support for a new microcontroller.
+title: "[MCU]: "
+labels: ["mcu-support", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form to request (or contribute) support for a new MCU.
+        A complete datasheet excerpt speeds up review dramatically. You can
+        also let an AI agent pre-fill most of these fields via
+        `/mcp.freeocd.create_target_from_datasheet` in MCP-enabled clients.
+  - type: input
+    id: mcu
+    attributes:
+      label: MCU name
+      placeholder: "nRF54L15 / STM32G491 / RP2040 / ESP32-S3"
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Proposed platform id
+      placeholder: "nordic / stm32 / rp2040 / esp32 / nxp / silicon_labs / renesas"
+    validations:
+      required: true
+  - type: input
+    id: cpu
+    attributes:
+      label: CPU core
+      placeholder: "cortex-m33"
+    validations:
+      required: true
+  - type: input
+    id: datasheet
+    attributes:
+      label: Datasheet URL
+      placeholder: "https://..."
+    validations:
+      required: false
+  - type: textarea
+    id: register_map
+    attributes:
+      label: Relevant register excerpts
+      description: CTRL-AP / MEM-AP / flash controller register addresses and bitfields.
+    validations:
+      required: false
+  - type: textarea
+    id: probe
+    attributes:
+      label: Probe you plan to use
+    validations:
+      required: false
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Are you able to contribute?
+      options:
+        - label: I can provide a working target JSON (even a draft).
+        - label: I can test the target on real hardware.
+        - label: I can open a PR once a maintainer greenlights the design.

@@ -1,0 +1,35 @@
+# Compiled output
+out/
+dist/
+
+# DAPjs built artifacts (built by `npm run build:dapjs`)
+vendor/dapjs/dist/
+vendor/dapjs/docs/
+vendor/dapjs/types/
+
+# Dependencies
+node_modules/
+
+# VSCode extension packaging
+*.vsix
+.vscode-test/
+extract/
+*.zip
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+*.swp
+*.swo
+*~
+
+# User workspace files (for local testing)
+.freeocd/
+*.hex.local
+
+# Environment files (for VSCE secret scanning awareness)
+.env
+.env.local
+.env.*.local

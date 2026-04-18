@@ -1,0 +1,482 @@
+{
+  "name": "freeocd-extension",
+  "displayName": "%displayName%",
+  "description": "%description%",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.101.0"
+  },
+  "license": "BSD-3-Clause",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/FreeOCD/freeocd-vscode-extension"
+  },
+  "publisher": "FreeOCD",
+  "icon": "out/icons/freeocd.png",
+  "categories": [
+    "Other",
+    "Debuggers"
+  ],
+  "keywords": [
+    "cmsis-dap",
+    "dapjs",
+    "flash",
+    "debug",
+    "rtt",
+    "nrf54l15",
+    "nordic",
+    "mcu",
+    "microcontroller"
+  ],
+  "homepage": "https://github.com/FreeOCD/freeocd-vscode-extension",
+  "bugs": {
+    "url": "https://github.com/FreeOCD/freeocd-vscode-extension/issues"
+  },
+  "l10n": "./l10n",
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "%capabilities.untrustedWorkspaces.description%"
+    },
+    "virtualWorkspaces": false
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "freeocd.connectProbe",
+        "title": "%command.connectProbe%",
+        "category": "FreeOCD",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "freeocd.disconnectProbe",
+        "title": "%command.disconnectProbe%",
+        "category": "FreeOCD",
+        "icon": "$(debug-disconnect)"
+      },
+      {
+        "command": "freeocd.selectTargetMcu",
+        "title": "%command.selectTargetMcu%",
+        "category": "FreeOCD",
+        "icon": "$(circuit-board)"
+      },
+      {
+        "command": "freeocd.importTargetDefinition",
+        "title": "%command.importTargetDefinition%",
+        "category": "FreeOCD"
+      },
+      {
+        "command": "freeocd.selectHexFile",
+        "title": "%command.selectHexFile%",
+        "category": "FreeOCD"
+      },
+      {
+        "command": "freeocd.flash",
+        "title": "%command.flash%",
+        "category": "FreeOCD",
+        "icon": "$(zap)"
+      },
+      {
+        "command": "freeocd.verify",
+        "title": "%command.verify%",
+        "category": "FreeOCD",
+        "icon": "$(check)"
+      },
+      {
+        "command": "freeocd.recover",
+        "title": "%command.recover%",
+        "category": "FreeOCD",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "freeocd.softReset",
+        "title": "%command.softReset%",
+        "category": "FreeOCD",
+        "icon": "$(debug-restart)"
+      },
+      {
+        "command": "freeocd.toggleAutoFlash",
+        "title": "%command.toggleAutoFlash%",
+        "category": "FreeOCD"
+      },
+      {
+        "command": "freeocd.connectRtt",
+        "title": "%command.connectRtt%",
+        "category": "FreeOCD",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "freeocd.disconnectRtt",
+        "title": "%command.disconnectRtt%",
+        "category": "FreeOCD",
+        "icon": "$(debug-disconnect)"
+      },
+      {
+        "command": "freeocd.openRttTerminal",
+        "title": "%command.openRttTerminal%",
+        "category": "FreeOCD",
+        "icon": "$(output)"
+      },
+      {
+        "command": "freeocd.setupMcp",
+        "title": "%command.setupMcp%",
+        "category": "FreeOCD"
+      },
+      {
+        "command": "freeocd.openStorageFolder",
+        "title": "%command.openStorageFolder%",
+        "category": "FreeOCD"
+      },
+      {
+        "command": "freeocd.showLog",
+        "title": "%command.showLog%",
+        "category": "FreeOCD"
+      },
+      {
+        "command": "freeocd.refreshProbes",
+        "title": "%command.refreshProbes%",
+        "category": "FreeOCD",
+        "icon": "$(refresh)"
+      }
+    ],
+    "configuration": {
+      "title": "FreeOCD",
+      "properties": {
+        "freeocd.connection.method": {
+          "type": "string",
+          "default": "hid",
+          "enum": [
+            "hid"
+          ],
+          "enumDescriptions": [
+            "%config.connection.method.hid%"
+          ],
+          "description": "%config.connection.method%"
+        },
+        "freeocd.target.mcu": {
+          "type": "string",
+          "default": "nordic/nrf54/nrf54l15",
+          "description": "%config.target.mcu%"
+        },
+        "freeocd.hexFile": {
+          "type": "string",
+          "default": "",
+          "description": "%config.hexFile%"
+        },
+        "freeocd.flash.verifyAfterFlash": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.flash.verifyAfterFlash%"
+        },
+        "freeocd.autoFlash.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "%config.autoFlash.enabled%"
+        },
+        "freeocd.autoFlash.confirmBeforeFlash": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.autoFlash.confirmBeforeFlash%"
+        },
+        "freeocd.rtt.scanStart": {
+          "type": "string",
+          "default": "0x20000000",
+          "description": "%config.rtt.scanStart%"
+        },
+        "freeocd.rtt.scanRange": {
+          "type": "string",
+          "default": "0x10000",
+          "description": "%config.rtt.scanRange%"
+        },
+        "freeocd.rtt.pollingInterval": {
+          "type": "number",
+          "default": 100,
+          "minimum": 10,
+          "maximum": 5000,
+          "description": "%config.rtt.pollingInterval%"
+        },
+        "freeocd.rtt.autoOpenTerminal": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.rtt.autoOpenTerminal%"
+        },
+        "freeocd.mcp.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.mcp.enabled%"
+        },
+        "freeocd.mcp.sessionLogSize": {
+          "type": "number",
+          "default": 200,
+          "minimum": 10,
+          "maximum": 2000,
+          "description": "%config.mcp.sessionLogSize%"
+        },
+        "freeocd.log.level": {
+          "type": "string",
+          "default": "info",
+          "enum": [
+            "trace",
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
+          "description": "%config.log.level%"
+        },
+        "freeocd.showWalkthroughOnFirstActivation": {
+          "type": "boolean",
+          "default": true,
+          "description": "%config.showWalkthroughOnFirstActivation%"
+        }
+      }
+    },
+    "mcpServerDefinitionProviders": [
+      {
+        "id": "freeocd.mcpServer",
+        "label": "FreeOCD"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "freeocd-explorer",
+          "title": "FreeOCD",
+          "icon": "out/icons/freeocd.svg"
+        }
+      ]
+    },
+    "views": {
+      "freeocd-explorer": [
+        {
+          "id": "freeocd-connection",
+          "name": "%view.connection%"
+        },
+        {
+          "id": "freeocd-target",
+          "name": "%view.target%"
+        },
+        {
+          "id": "freeocd-flasher",
+          "name": "%view.flasher%"
+        },
+        {
+          "id": "freeocd-debugger",
+          "name": "%view.debugger%"
+        },
+        {
+          "id": "freeocd-mcp-status",
+          "name": "%view.mcpStatus%"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "freeocd-connection",
+        "contents": "%viewsWelcome.connection%"
+      },
+      {
+        "view": "freeocd-target",
+        "contents": "%viewsWelcome.target%"
+      },
+      {
+        "view": "freeocd-flasher",
+        "contents": "%viewsWelcome.flasher%"
+      },
+      {
+        "view": "freeocd-debugger",
+        "contents": "%viewsWelcome.debugger%"
+      }
+    ],
+    "walkthroughs": [
+      {
+        "id": "freeocd.getStarted",
+        "title": "%walkthrough.title%",
+        "description": "%walkthrough.description%",
+        "steps": [
+          {
+            "id": "connect",
+            "title": "%walkthrough.step.connect.title%",
+            "description": "%walkthrough.step.connect.description%",
+            "media": {
+              "markdown": "out/walkthrough/connect-probe.md"
+            },
+            "completionEvents": [
+              "onCommand:freeocd.connectProbe"
+            ]
+          },
+          {
+            "id": "selectTarget",
+            "title": "%walkthrough.step.selectTarget.title%",
+            "description": "%walkthrough.step.selectTarget.description%",
+            "media": {
+              "markdown": "out/walkthrough/select-target.md"
+            },
+            "completionEvents": [
+              "onCommand:freeocd.selectTargetMcu"
+            ]
+          },
+          {
+            "id": "selectHex",
+            "title": "%walkthrough.step.selectHex.title%",
+            "description": "%walkthrough.step.selectHex.description%",
+            "media": {
+              "markdown": "out/walkthrough/select-hex.md"
+            },
+            "completionEvents": [
+              "onCommand:freeocd.selectHexFile"
+            ]
+          },
+          {
+            "id": "firstFlash",
+            "title": "%walkthrough.step.firstFlash.title%",
+            "description": "%walkthrough.step.firstFlash.description%",
+            "media": {
+              "markdown": "out/walkthrough/first-flash.md"
+            },
+            "completionEvents": [
+              "onCommand:freeocd.flash"
+            ]
+          }
+        ]
+      }
+    ],
+    "taskDefinitions": [
+      {
+        "type": "freeocd",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "flash",
+              "verify",
+              "recover"
+            ],
+            "description": "%taskDefinition.action%"
+          },
+          "file": {
+            "type": "string",
+            "description": "%taskDefinition.file%"
+          },
+          "target": {
+            "type": "string",
+            "description": "%taskDefinition.target%"
+          },
+          "verify": {
+            "type": "boolean",
+            "description": "%taskDefinition.verify%"
+          }
+        }
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "when": "resourceExtname == .hex",
+          "command": "freeocd.selectHexFile",
+          "group": "freeocd"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "freeocd.connectProbe",
+          "when": "view == freeocd-connection",
+          "group": "navigation@1"
+        },
+        {
+          "command": "freeocd.disconnectProbe",
+          "when": "view == freeocd-connection",
+          "group": "navigation@2"
+        },
+        {
+          "command": "freeocd.refreshProbes",
+          "when": "view == freeocd-connection",
+          "group": "navigation@3"
+        },
+        {
+          "command": "freeocd.selectTargetMcu",
+          "when": "view == freeocd-target",
+          "group": "navigation@1"
+        },
+        {
+          "command": "freeocd.flash",
+          "when": "view == freeocd-flasher",
+          "group": "navigation@1"
+        },
+        {
+          "command": "freeocd.recover",
+          "when": "view == freeocd-flasher",
+          "group": "navigation@2"
+        },
+        {
+          "command": "freeocd.selectTargetMcu",
+          "when": "view == freeocd-flasher",
+          "group": "navigation@3"
+        },
+        {
+          "command": "freeocd.connectRtt",
+          "when": "view == freeocd-debugger",
+          "group": "navigation@1"
+        },
+        {
+          "command": "freeocd.disconnectRtt",
+          "when": "view == freeocd-debugger",
+          "group": "navigation@2"
+        },
+        {
+          "command": "freeocd.openRttTerminal",
+          "when": "view == freeocd-debugger",
+          "group": "navigation@3"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run clean && npm run compile",
+    "clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\"",
+    "compile": "webpack --mode production",
+    "watch": "webpack --mode development --watch",
+    "compile-tests": "tsc -p .",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "lint": "eslint src",
+    "lint:targets": "node scripts/validate-targets.js",
+    "test": "vscode-test",
+    "package": "vsce package",
+    "build:dapjs": "node scripts/build-dapjs.js"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "@types/node-hid": "^1.3.4",
+    "@types/vscode": "^1.101.0",
+    "@typescript-eslint/eslint-plugin": "^8.28.0",
+    "@typescript-eslint/parser": "^8.28.0",
+    "@vscode/l10n-dev": "^0.0.35",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.4.1",
+    "@vscode/vsce": "^3.2.2",
+    "copy-webpack-plugin": "^14.0.0",
+    "eslint": "^10.2.0",
+    "ovsx": "^0.10.11",
+    "ts-loader": "^9.5.2",
+    "typescript": "^6.0.2",
+    "webpack": "^5.98.0",
+    "webpack-cli": "^7.0.2"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@vscode/l10n": "^0.0.18",
+    "node-hid": "^3.1.2",
+    "zod": "^3.25.0"
+  }
+}

@@ -1,0 +1,76 @@
+name: Bug report
+description: File a reproducible bug report for FreeOCD.
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. The more detail you give,
+        the faster we can reproduce and fix it.
+  - type: input
+    id: version
+    attributes:
+      label: FreeOCD version
+      description: Output of `FreeOCD: Show Log` or the Extensions view version field.
+      placeholder: "0.0.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: ide
+    attributes:
+      label: IDE
+      options:
+        - VS Code
+        - Windsurf
+        - Windsurf-Next
+        - Cursor
+        - Other (specify in description)
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS + architecture
+      placeholder: "macOS 14.5 arm64 / Windows 11 x64 / Ubuntu 24.04 x64"
+    validations:
+      required: true
+  - type: input
+    id: probe
+    attributes:
+      label: CMSIS-DAP probe
+      placeholder: "DAPLink on NUCLEO-L432KC / Picoprobe / XIAO+CMSIS-DAP"
+    validations:
+      required: false
+  - type: input
+    id: target
+    attributes:
+      label: Target MCU
+      placeholder: "nordic/nrf54/nrf54l15"
+    validations:
+      required: false
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the unexpected behaviour.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. …
+        2. …
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: FreeOCD log (trace or debug)
+      description: Paste the relevant section from `FreeOCD: Show Log`.
+      render: text
+    validations:
+      required: false
