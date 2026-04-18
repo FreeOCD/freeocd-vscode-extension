@@ -1,0 +1,8 @@
+{
+  "description": "Known CMSIS-DAP probe vendor IDs for filtering",
+  "vendorIds": [
+    "0x0D28",
+    "0x2886",
+    "0x2E8A"
+  ]
+}

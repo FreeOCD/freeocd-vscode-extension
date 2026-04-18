@@ -18,6 +18,8 @@
  */
 
 import { platform } from 'os';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import type { HID } from 'node-hid';
 import type { BufferSource, DapjsTransport, TransportBackend } from './transport-interface';
 import type { ProbeInfo, TransportMethod } from '../common/types';
@@ -35,6 +37,46 @@ const DEFAULT_PACKET_SIZE = 64;
  * is considered a candidate.
  */
 export const CMSIS_DAP_USAGE_PAGE = 0xff00;
+
+/**
+ * Known CMSIS-DAP probe vendor IDs loaded from resources/probe-filters.json.
+ * These vendor IDs are used to filter probes in addition to usagePage and
+ * product name matching.
+ */
+let KNOWN_CMSIS_DAP_VENDOR_IDS: number[] = [];
+
+/**
+ * Initialize vendor ID filter from JSON file.
+ * This must be called after the extension context is available.
+ */
+export function initProbeFilters(extensionPath: string): void {
+  let filtersPath: string;
+  let loaded = false;
+
+  // Try production path first (out/probe-filters.json)
+  try {
+    filtersPath = join(extensionPath, 'probe-filters.json');
+    const filtersData = JSON.parse(readFileSync(filtersPath, 'utf-8'));
+    if (filtersData.vendorIds && Array.isArray(filtersData.vendorIds)) {
+      KNOWN_CMSIS_DAP_VENDOR_IDS = filtersData.vendorIds.map((vid: string) => parseInt(vid, 16));
+      log.info(`Loaded ${KNOWN_CMSIS_DAP_VENDOR_IDS.length} CMSIS-DAP vendor IDs: ${KNOWN_CMSIS_DAP_VENDOR_IDS.map(vid => '0x' + vid.toString(16)).join(', ')}`);
+      loaded = true;
+    }
+  } catch (err) {
+    // Try development path (resources/probe-filters.json)
+    try {
+      filtersPath = join(extensionPath, 'resources/probe-filters.json');
+      const filtersData = JSON.parse(readFileSync(filtersPath, 'utf-8'));
+      if (filtersData.vendorIds && Array.isArray(filtersData.vendorIds)) {
+        KNOWN_CMSIS_DAP_VENDOR_IDS = filtersData.vendorIds.map((vid: string) => parseInt(vid, 16));
+        log.info(`Loaded ${KNOWN_CMSIS_DAP_VENDOR_IDS.length} CMSIS-DAP vendor IDs: ${KNOWN_CMSIS_DAP_VENDOR_IDS.map(vid => '0x' + vid.toString(16)).join(', ')}`);
+        loaded = true;
+      }
+    } catch (devErr) {
+      log.warn(`Failed to load probe-filters.json from both production and development paths. Vendor ID filtering will be disabled.`);
+    }
+  }
+}
 
 /**
  * node-hid transport implementation conforming to `DapjsTransport`.
@@ -140,10 +182,15 @@ export class HidBackend implements TransportBackend {
         device.usagePage === CMSIS_DAP_USAGE_PAGE ||
         /CMSIS-?DAP/i.test(product) ||
         /DAPLink/i.test(product) ||
-        /Picoprobe/i.test(product) ||
-        /XIAO/i.test(product);
+        /Picoprobe/i.test(product);
 
-      if (!isCmsisDap) {
+      // Vendor ID filtering: if we have a list of known vendor IDs, only include devices from those vendors
+      // If the list is empty (e.g., JSON failed to load), skip this check to maintain backward compatibility
+      const isKnownProbe =
+        KNOWN_CMSIS_DAP_VENDOR_IDS.length === 0 ||
+        KNOWN_CMSIS_DAP_VENDOR_IDS.includes(device.vendorId);
+
+      if (!isCmsisDap || !isKnownProbe) {
         continue;
       }
 

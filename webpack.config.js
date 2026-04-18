@@ -56,7 +56,8 @@ const extensionConfig = {
         { from: 'resources/icons', to: 'icons' },
         { from: 'resources/targets', to: 'targets' },
         { from: 'resources/walkthrough', to: 'walkthrough' },
-        { from: 'resources/tool-sets', to: 'tool-sets' }
+        { from: 'resources/tool-sets', to: 'tool-sets' },
+        { from: 'resources/probe-filters.json', to: 'probe-filters.json' }
       ]
     })
   ],

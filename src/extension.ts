@@ -25,7 +25,7 @@ import { FreeOcdError, NotConnectedError, NoTargetError } from './common/errors'
 import { loadDapjs } from './common/dapjs-loader';
 import type { FlashProgress, TargetDefinition } from './common/types';
 
-import { HidBackend } from './transport/hid-transport';
+import { HidBackend, initProbeFilters } from './transport/hid-transport';
 import { registerTransport } from './transport/transport-registry';
 import { ConnectionManager } from './connection/connection-manager';
 import { TargetManager } from './target/target-manager';
@@ -56,6 +56,11 @@ const WALKTHROUGH_ID = 'FreeOCD.freeocd-extension#freeocd.getStarted';
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   initLogger();
   log.info(`FreeOCD extension activating (v${context.extension.packageJSON.version}).`);
+
+  // --------------------------------------------------------------------------
+  // Initialize probe filters
+  // --------------------------------------------------------------------------
+  initProbeFilters(context.extensionUri.fsPath);
 
   // --------------------------------------------------------------------------
   // Transport + connection
