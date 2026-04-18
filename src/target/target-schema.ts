@@ -117,7 +117,12 @@ export function targetDefinitionJsonSchema(): Record<string, unknown> {
       'capabilities'
     ],
     properties: {
-      id: { type: 'string', pattern: '^[a-z0-9_]+(/[a-z0-9_]+)+$' },
+      // Keep this pattern in sync with the Zod `targetDefinitionSchema.id`
+      // above — exactly three lowercase snake_case path segments. Any change
+      // here must be mirrored in the runtime schema or AI agents will get
+      // inconsistent validation results between the published JSON Schema
+      // resource and the `validate_target_definition` MCP tool.
+      id: { type: 'string', pattern: '^[a-z0-9_]+/[a-z0-9_]+/[a-z0-9_]+$' },
       name: { type: 'string' },
       platform: {
         type: 'string',

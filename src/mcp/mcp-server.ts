@@ -287,30 +287,31 @@ async function forwardRequest(tool: string, args: unknown): Promise<unknown> {
       if (!fs.existsSync(responseFile)) {
         continue;
       }
+      // Parse the response in its own try/catch so that only real JSON parse
+      // errors (SyntaxError from partial reads during an atomic rename) are
+      // retried. Application errors that happen to mention "JSON" in their
+      // message must propagate out instead of silently spinning until timeout.
+      const raw = fs.readFileSync(responseFile, 'utf8');
+      let resp: ForwardResponse;
       try {
-        const raw = fs.readFileSync(responseFile, 'utf8');
-        const resp = JSON.parse(raw) as ForwardResponse;
-        if (resp.requestId !== requestId) {
-          // Defensive: file should always match because it's uniquely named.
-          continue;
-        }
-        if (!resp.success) {
-          const msg = resp.error?.message ?? 'Unknown error';
-          throw new Error(msg);
-        }
-        return resp.result;
+        resp = JSON.parse(raw) as ForwardResponse;
       } catch (err) {
-        // Partial read during the extension's atomic rename is unlikely but
-        // possible on unusual filesystems — retry on JSON parse errors.
-        const message = (err as Error).message;
-        if (
-          message.startsWith('Unexpected') ||
-          message.includes('JSON')
-        ) {
+        if (err instanceof SyntaxError) {
+          // Partial read during the extension's atomic rename is unlikely but
+          // possible on unusual filesystems — retry on JSON parse errors.
           continue;
         }
         throw err;
       }
+      if (resp.requestId !== requestId) {
+        // Defensive: file should always match because it's uniquely named.
+        continue;
+      }
+      if (!resp.success) {
+        const msg = resp.error?.message ?? 'Unknown error';
+        throw new Error(msg);
+      }
+      return resp.result;
     }
     throw new Error(`Timed out waiting for extension host response for ${tool}`);
   } finally {

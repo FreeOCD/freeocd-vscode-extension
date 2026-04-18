@@ -82,6 +82,17 @@ export class ConnectionManager extends EventEmitter {
       throw new FreeOcdError('No transport backend registered.', 'NO_BACKEND');
     }
 
+    // Reject concurrent connect() calls so two in-flight attempts can't race
+    // on the same probe (e.g. UI double-click + MCP connect_probe). Only a
+    // fully 'connected' prior session is torn down here; a 'connecting' one
+    // must finish (or fail) before another attempt is allowed. See AI_REVIEW
+    // checklist item STA-03 ("Concurrent connect calls rejected or coalesced").
+    if (this.current.state === 'connecting') {
+      throw new FreeOcdError(
+        'A connection attempt is already in progress.',
+        'ALREADY_CONNECTING'
+      );
+    }
     if (this.current.state === 'connected') {
       await this.disconnect();
     }

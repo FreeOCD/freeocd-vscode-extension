@@ -105,7 +105,13 @@ export class McpBridge {
       return;
     }
     if (!this.watcher && this.handler) {
-      void this.activate(this.handler);
+      // Fire-and-forget is fine here — setEnabled() is synchronous for
+      // callers — but we must surface activation failures instead of
+      // swallowing them silently (otherwise the bridge appears enabled
+      // while no watcher is installed and no MCP requests are processed).
+      this.activate(this.handler).catch((err) => {
+        log.error(err as Error);
+      });
     }
   }
 

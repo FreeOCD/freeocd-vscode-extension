@@ -29,10 +29,33 @@ export class Flasher {
   private readonly progressEmitter = new vscode.EventEmitter<FlashProgress>();
   public readonly onDidReportProgress = this.progressEmitter.event;
 
+  // Single-flight guard so overlapping flash / verify / recover operations
+  // cannot race on the same probe. The VS Code progress UI is modal enough
+  // to discourage casual double-clicks, but MCP tool calls, tasks, and the
+  // auto-flash watcher all bypass that UI. AI_REVIEW checklist item STA-02
+  // ("Overlapping flash / verify / recover operations are prevented") relies
+  // on this flag.
+  private inProgress = false;
+
   constructor(private readonly deps: FlasherDeps) {}
 
   public dispose(): void {
     this.progressEmitter.dispose();
+  }
+
+  private async runExclusive<T>(op: string, fn: () => Promise<T>): Promise<T> {
+    if (this.inProgress) {
+      throw new FreeOcdError(
+        `Another flash operation is already in progress; cannot start ${op}.`,
+        'FLASH_BUSY'
+      );
+    }
+    this.inProgress = true;
+    try {
+      return await fn();
+    } finally {
+      this.inProgress = false;
+    }
   }
 
   public async loadHex(uri: vscode.Uri): Promise<ParsedHex> {
@@ -48,6 +71,7 @@ export class Flasher {
     uri: vscode.Uri,
     options: { verifyAfterFlash?: boolean; requestId?: string } = {}
   ): Promise<void> {
+    return this.runExclusive('flash', async () => {
     const requestId = options.requestId ?? genId();
     const hex = await this.loadHex(uri);
 
@@ -118,9 +142,11 @@ export class Flasher {
         }
       }
     );
+    });
   }
 
   public async verify(uri: vscode.Uri, options: { requestId?: string } = {}): Promise<{ success: boolean; mismatches: number }> {
+    return this.runExclusive('verify', async () => {
     const hex = await this.loadHex(uri);
     const requestId = options.requestId ?? genId();
     const handler = this.deps.getHandler();
@@ -170,9 +196,11 @@ export class Flasher {
         }
       }
     );
+    });
   }
 
   public async recover(options: { requestId?: string } = {}): Promise<void> {
+    return this.runExclusive('recover', async () => {
     const requestId = options.requestId ?? genId();
     const handler = this.deps.getHandler();
     const dap = this.deps.getDap();
@@ -212,20 +240,23 @@ export class Flasher {
         }
       }
     );
+    });
   }
 
   public async softReset(): Promise<void> {
-    const handler = this.deps.getHandler();
-    const dap = this.deps.getDap();
-    try {
-      await handler.reset(dap);
-      vscode.window.showInformationMessage(vscode.l10n.t('Soft reset requested.'));
-    } catch (err) {
-      vscode.window.showErrorMessage(
-        vscode.l10n.t('Soft reset failed: {0}', (err as Error).message)
-      );
-      throw err;
-    }
+    return this.runExclusive('soft reset', async () => {
+      const handler = this.deps.getHandler();
+      const dap = this.deps.getDap();
+      try {
+        await handler.reset(dap);
+        vscode.window.showInformationMessage(vscode.l10n.t('Soft reset requested.'));
+      } catch (err) {
+        vscode.window.showErrorMessage(
+          vscode.l10n.t('Soft reset failed: {0}', (err as Error).message)
+        );
+        throw err;
+      }
+    });
   }
 
   private async verifyInternal(
