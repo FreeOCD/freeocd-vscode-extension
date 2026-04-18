@@ -17,6 +17,8 @@ jobs:
     name: Release gate (lint + Linux test)
     runs-on: ubuntu-latest
     steps:
+      - name: Disable CRLF conversion
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -76,6 +78,8 @@ jobs:
             cross: true
     runs-on: ${{ matrix.os }}
     steps:
+      - name: Disable CRLF conversion
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
         with:
           submodules: recursive
