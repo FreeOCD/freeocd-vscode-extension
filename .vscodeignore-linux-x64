@@ -12,7 +12,10 @@ node_modules/**
 !node_modules/node-hid/binding-options.js
 !node_modules/node-hid/prebuilds/HID-linux-x64/**
 !node_modules/node-hid/prebuilds/HID_hidraw-linux-x64/**
-!node_modules/pkg-prebuilds/**
+!node_modules/pkg-prebuilds/package.json
+!node_modules/pkg-prebuilds/bindings.js
+!node_modules/pkg-prebuilds/lib/**
+!node_modules/pkg-prebuilds/LICENSE
 .gitmodules
 .github/**
 tsconfig.json
