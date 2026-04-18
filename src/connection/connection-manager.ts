@@ -93,7 +93,11 @@ export class ConnectionManager extends EventEmitter {
         'ALREADY_CONNECTING'
       );
     }
-    if (this.current.state === 'connected') {
+    // Also tear down after a failed prior attempt: the previous connect() may
+    // have opened a transport before failing during `adi.connect()`, leaving
+    // `this.transport` populated. Without this cleanup, a retry would open a
+    // second HID handle and orphan the first.
+    if (this.current.state === 'connected' || this.current.state === 'error') {
       await this.disconnect();
     }
 

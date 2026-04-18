@@ -40,6 +40,7 @@
       "select_target",
       "create_target_definition",
       "update_target_definition",
+      "delete_target_definition",
       "validate_target_definition",
       "test_target_definition"
     ],
@@ -84,6 +85,11 @@
   },
   "freeocd-session": {
     "tools": [
+      "list_connection_methods",
+      "list_probes",
+      "connect_probe",
+      "disconnect_probe",
+      "get_connection_info",
       "describe_capabilities",
       "get_session_log",
       "get_command_history",
