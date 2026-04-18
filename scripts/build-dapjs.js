@@ -40,7 +40,7 @@ const backupPath = path.join(dapjsRoot, 'tsconfig.json.freeocd-backup');
  */
 function run(cmd, args, cwd) {
   console.log(`\n$ ${cmd} ${args.join(' ')} (cwd=${cwd})`);
-  const result = spawnSync(cmd, args, { cwd, stdio: 'inherit', shell: false });
+  const result = spawnSync(cmd, args, { cwd, stdio: 'inherit', shell: process.platform === 'win32' });
   if (result.status !== 0) {
     throw new Error(`${cmd} ${args.join(' ')} exited with code ${result.status}`);
   }
