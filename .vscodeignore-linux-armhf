@@ -50,3 +50,5 @@ out/icons/freeocd-marketplace.svg
 **/*.map
 **/*.ts
 !out/**/*.js
+!node_modules/node-hid/prebuilds/HID-linux-arm/**
+!node_modules/node-hid/prebuilds/HID_hidraw-linux-arm/**

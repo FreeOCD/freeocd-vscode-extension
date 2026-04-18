@@ -12,7 +12,7 @@
     "url": "https://github.com/FreeOCD/freeocd-vscode-extension"
   },
   "publisher": "FreeOCD",
-  "icon": "resources/icons/freeocd.png",
+  "icon": "out/icons/freeocd.png",
   "categories": [
     "Other",
     "Debuggers"
@@ -239,7 +239,7 @@
         {
           "id": "freeocd-explorer",
           "title": "FreeOCD",
-          "icon": "resources/icons/freeocd.svg"
+          "icon": "out/icons/freeocd.svg"
         }
       ]
     },
@@ -296,7 +296,7 @@
             "title": "%walkthrough.step.connect.title%",
             "description": "%walkthrough.step.connect.description%",
             "media": {
-              "markdown": "resources/walkthrough/connect-probe.md"
+              "markdown": "out/walkthrough/connect-probe.md"
             },
             "completionEvents": [
               "onCommand:freeocd.connectProbe"
@@ -307,7 +307,7 @@
             "title": "%walkthrough.step.selectTarget.title%",
             "description": "%walkthrough.step.selectTarget.description%",
             "media": {
-              "markdown": "resources/walkthrough/select-target.md"
+              "markdown": "out/walkthrough/select-target.md"
             },
             "completionEvents": [
               "onCommand:freeocd.selectTargetMcu"
@@ -318,7 +318,7 @@
             "title": "%walkthrough.step.selectHex.title%",
             "description": "%walkthrough.step.selectHex.description%",
             "media": {
-              "markdown": "resources/walkthrough/select-hex.md"
+              "markdown": "out/walkthrough/select-hex.md"
             },
             "completionEvents": [
               "onCommand:freeocd.selectHexFile"
@@ -329,7 +329,7 @@
             "title": "%walkthrough.step.firstFlash.title%",
             "description": "%walkthrough.step.firstFlash.description%",
             "media": {
-              "markdown": "resources/walkthrough/first-flash.md"
+              "markdown": "out/walkthrough/first-flash.md"
             },
             "completionEvents": [
               "onCommand:freeocd.flash"

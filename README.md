@@ -1,6 +1,6 @@
 # FreeOCD VSCode Extension
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/FreeOCD/freeocd-vscode-extension)
+[![Ask DeepWiki](https://img.shields.io/badge/Ask%20DeepWiki-20232A?style=flat&logoColor=white&format=png)](https://deepwiki.com/FreeOCD/freeocd-vscode-extension)
 [![CI](https://github.com/FreeOCD/freeocd-vscode-extension/actions/workflows/ci.yml/badge.svg)](https://github.com/FreeOCD/freeocd-vscode-extension/actions/workflows/ci.yml)
 [![Release](https://github.com/FreeOCD/freeocd-vscode-extension/actions/workflows/release.yml/badge.svg)](https://github.com/FreeOCD/freeocd-vscode-extension/actions/workflows/release.yml)
 [![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](LICENSE)
