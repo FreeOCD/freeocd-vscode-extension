@@ -64,7 +64,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // where the native binding is missing (we surface a clear error on connect).
   let nodeHid: typeof import('node-hid') | undefined;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     nodeHid = require('node-hid') as typeof import('node-hid');
   } catch (err) {
     log.warn(`node-hid native binding failed to load: ${(err as Error).message}`);

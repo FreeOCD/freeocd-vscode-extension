@@ -24,7 +24,7 @@ export type ToolSetName =
   | 'freeocd-low-level'
   | 'freeocd-session';
 
-export interface ToolDefinition<TArgs = unknown, TResult = unknown> {
+export interface ToolDefinition<TArgs = unknown, _TResult = unknown> {
   name: string;
   description: string;
   toolSet: ToolSetName;
@@ -35,5 +35,4 @@ export interface ToolDefinition<TArgs = unknown, TResult = unknown> {
   requiresTarget?: boolean;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type ToolDef = ToolDefinition<any, any>;

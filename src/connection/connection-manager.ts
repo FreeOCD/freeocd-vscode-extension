@@ -16,7 +16,7 @@
 
 import { EventEmitter } from 'events';
 import type { DapjsTransport, TransportBackend } from '../transport/transport-interface';
-import type { ConnectionInfo, ProbeInfo, TransportMethod } from '../common/types';
+import type { ConnectionInfo, ProbeInfo } from '../common/types';
 import { NotConnectedError, FreeOcdError } from '../common/errors';
 import { log } from '../common/logger';
 import { loadDapjs } from '../common/dapjs-loader';

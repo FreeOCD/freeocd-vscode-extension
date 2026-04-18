@@ -50,7 +50,6 @@ const IPC_DIR = process.env.FREEOCD_IPC_DIR;
 const REQUEST_TIMEOUT_MS = Number(process.env.FREEOCD_REQUEST_TIMEOUT_MS ?? '120000');
 
 if (!IPC_DIR) {
-  // eslint-disable-next-line no-console
   console.error('[freeocd-mcp] FREEOCD_IPC_DIR environment variable is not set. Aborting.');
   process.exit(2);
 }
@@ -213,7 +212,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  // eslint-disable-next-line no-console
   console.error('[freeocd-mcp] Fatal error:', err);
   process.exit(1);
 });

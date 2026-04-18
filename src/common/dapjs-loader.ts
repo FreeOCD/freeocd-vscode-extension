@@ -43,8 +43,7 @@ export function loadDapjs(): DapjsModule {
   const req: NodeRequire =
     typeof __non_webpack_require__ === 'function'
       ? __non_webpack_require__
-      : // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require;
+      : require;
 
   let mod: unknown;
   try {

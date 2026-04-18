@@ -25,7 +25,6 @@ import type { TargetDefinition } from '../common/types';
 /**
  * Registry of platform handlers. Extend this map to add new MCU families.
  */
-// eslint-disable-next-line @typescript-eslint/naming-convention
 const PLATFORM_HANDLERS: Record<string, new (target: TargetDefinition) => PlatformHandler> = {
   nordic: NordicHandler
   // stm32: StmHandler,
