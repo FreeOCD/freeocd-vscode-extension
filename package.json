@@ -62,7 +62,8 @@
       {
         "command": "freeocd.selectTargetMcu",
         "title": "%command.selectTargetMcu%",
-        "category": "FreeOCD"
+        "category": "FreeOCD",
+        "icon": "$(circuit-board)"
       },
       {
         "command": "freeocd.importTargetDefinition",
@@ -386,7 +387,17 @@
         {
           "command": "freeocd.flash",
           "when": "view == freeocd-flasher",
-          "group": "navigation"
+          "group": "navigation@1"
+        },
+        {
+          "command": "freeocd.recover",
+          "when": "view == freeocd-flasher",
+          "group": "navigation@2"
+        },
+        {
+          "command": "freeocd.selectTargetMcu",
+          "when": "view == freeocd-flasher",
+          "group": "navigation@3"
         }
       ]
     }
