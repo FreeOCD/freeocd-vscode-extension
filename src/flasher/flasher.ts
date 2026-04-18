@@ -92,6 +92,14 @@ export class Flasher {
           if (options.verifyAfterFlash) {
             await this.verifyInternal(dap, handler, hex, requestId, vsToken);
           }
+
+          // Reset the target so the freshly-flashed image starts running.
+          // Errors here are non-fatal — the flash itself already succeeded.
+          try {
+            await handler.reset(dap);
+          } catch (resetErr) {
+            log.warn(`Post-flash reset warning: ${(resetErr as Error).message}`);
+          }
         } catch (err) {
           this.emit({ requestId, phase: 'error', percent: lastPct, message: (err as Error).message });
           if (err instanceof CancelledError) {

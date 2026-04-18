@@ -437,7 +437,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const config = vscode.workspace.getConfiguration('freeocd');
         const { RttHandler } = await import('./rtt/rtt-handler');
         const dapjs = loadDapjs();
-        const processor = new dapjs.CortexM(connection.getDap().adi);
+        const processor = new dapjs.CortexM(connection.getDap().proxy);
         const handler = new RttHandler(processor as never, {
           scanStartAddress: parseInt(config.get<string>('rtt.scanStart', '0x20000000'), 16),
           scanRange: parseInt(config.get<string>('rtt.scanRange', '0x10000'), 16)

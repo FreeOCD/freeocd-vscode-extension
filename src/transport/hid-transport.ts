@@ -14,7 +14,7 @@
  *
  * A CMSIS-DAP v1 probe exposes a 64-byte HID report. We send commands by
  * calling `device.write` (prefixing an extra byte on Windows, per node-hid
- * documentation) and read responses via `device.readTimeout`.
+ * documentation) and read responses via the async `device.read` callback.
  */
 
 import { platform } from 'os';
@@ -24,7 +24,6 @@ import type { ProbeInfo, TransportMethod } from '../common/types';
 import { log } from '../common/logger';
 
 const DEFAULT_PACKET_SIZE = 64;
-const READ_TIMEOUT_MS = 1000;
 
 /**
  * CMSIS-DAP v1 HID vendor/product ID filter list.
@@ -43,12 +42,22 @@ export const CMSIS_DAP_USAGE_PAGE = 0xff00;
 export class HidTransport implements DapjsTransport {
   public readonly packetSize = DEFAULT_PACKET_SIZE;
   private readonly os = platform();
+  private device: HID;
   private closed = false;
 
-  constructor(private readonly device: HID) {}
+  constructor(device: HID, private readonly reopen: () => HID) {
+    this.device = device;
+  }
 
   public async open(): Promise<void> {
-    // node-hid opens the device during enumeration; no-op here.
+    // Re-create the underlying node-hid device if we were previously closed
+    // (e.g. after DAPjs `ADI.reconnect()` which closes the transport then
+    // re-opens it). node-hid does not support reopening a closed HID handle,
+    // so we ask the backend to construct a fresh one via the `reopen` factory.
+    if (this.closed) {
+      this.device = this.reopen();
+      this.closed = false;
+    }
   }
 
   public async close(): Promise<void> {
@@ -64,20 +73,11 @@ export class HidTransport implements DapjsTransport {
   }
 
   public async read(): Promise<DataView> {
+    // Always use the async read callback (which runs on a node-hid background
+    // thread) rather than the synchronous `readTimeout`. The sync variant
+    // blocks the JS event loop and — on macOS — reliably causes `Cannot write
+    // to hid device` errors after a few thousand iterations of a flash loop.
     const data = await new Promise<number[]>((resolve, reject) => {
-      // node-hid 3.x supports readTimeout; we fall back to read() if not.
-      const maybeReadTimeout = (this.device as unknown as {
-        readTimeout?: (timeout: number) => number[];
-      }).readTimeout;
-      if (typeof maybeReadTimeout === 'function') {
-        try {
-          const bytes = maybeReadTimeout.call(this.device, READ_TIMEOUT_MS);
-          resolve(bytes);
-        } catch (err) {
-          reject(err instanceof Error ? err : new Error(String(err)));
-        }
-        return;
-      }
       this.device.read((error, bytes) => {
         if (error) {
           reject(error instanceof Error ? error : new Error(String(error)));
@@ -169,7 +169,8 @@ export class HidBackend implements TransportBackend {
       throw new Error('Probe path is empty.');
     }
     const HID = this.nodeHid.HID;
-    const device = new HID(probe.path);
-    return new HidTransport(device);
+    const path = probe.path;
+    const device = new HID(path);
+    return new HidTransport(device, () => new HID(path));
   }
 }

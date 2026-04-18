@@ -49,6 +49,8 @@ interface DapInstance {
   reset(): Promise<void>;
   readMem32(addr: number): Promise<number>;
   writeMem32(addr: number, value: number): Promise<void>;
+  writeBlock(addr: number, values: Uint32Array): Promise<void>;
+  readBlock(addr: number, count: number): Promise<Uint32Array>;
 }
 
 function asDap(dap: unknown): DapInstance {
@@ -193,41 +195,20 @@ export class NordicHandler extends PlatformHandler {
     await this.initFlashController(dap, transport);
 
     log.info(`Writing ${totalWords} words...`);
+    // Use ADI.writeBlock, which internally batches multiple words per
+    // `DAP_TRANSFER_BLOCK` HID packet and splits on the MEM-AP TAR
+    // auto-increment page boundary (1 KiB). Writing one word per
+    // `DAP_TRANSFER` is both much slower and, in practice, makes node-hid
+    // unstable after tens of thousands of round trips.
+    const CHUNK_WORDS = 256; // 1 KiB — matches TAR autoinc page on nRF
     let wordsWritten = 0;
-    let currentTarAddress = -1;
-
     while (wordsWritten < totalWords) {
       throwIfCancelled(token);
-      const currentAddress = startAddress + wordsWritten * 4;
-      const needTarUpdate = currentTarAddress === -1 || (currentAddress & 0x3ff) === 0;
-
-      if (needTarUpdate) {
-        await rawDapTransferWrite(transport, [
-          {
-            port: DAP_PORT_ACCESS,
-            mode: DAP_TRANSFER_WRITE,
-            register: AP_TAR,
-            value: currentAddress
-          }
-        ]);
-        currentTarAddress = currentAddress;
-      }
-
-      await rawDapTransferWrite(transport, [
-        {
-          port: DAP_PORT_ACCESS,
-          mode: DAP_TRANSFER_WRITE,
-          register: AP_DRW,
-          value: words[wordsWritten]
-        }
-      ]);
-      currentTarAddress += 4;
-      wordsWritten++;
-
-      if (wordsWritten % 256 === 0 || wordsWritten === totalWords) {
-        const progress = (wordsWritten / totalWords) * 100;
-        onProgress(progress, `Flashed ${wordsWritten * 4} / ${firmware.length} bytes`);
-      }
+      const chunk = words.subarray(wordsWritten, wordsWritten + CHUNK_WORDS);
+      await dap.writeBlock(startAddress + wordsWritten * 4, chunk);
+      wordsWritten += chunk.length;
+      const progress = (wordsWritten / totalWords) * 100;
+      onProgress(progress, `Flashed ${wordsWritten * 4} / ${firmware.length} bytes`);
     }
 
     log.info('Firmware write completed!');
@@ -247,36 +228,42 @@ export class NordicHandler extends PlatformHandler {
     const verifyWords = Math.ceil(verifySize / 4);
     let mismatchCount = 0;
 
-    for (let wordIdx = 0; wordIdx < verifyWords; wordIdx++) {
+    // Read back the image in 1 KiB chunks using ADI.readBlock (which uses
+    // `DAP_TRANSFER_BLOCK` internally). Reading a single word at a time via
+    // `readMem32` would issue ~3x the DAP transfers per word and stall the
+    // HID transport after thousands of iterations.
+    const CHUNK_WORDS = 256; // 1 KiB TAR autoinc page
+    let wordIdx = 0;
+    while (wordIdx < verifyWords) {
       throwIfCancelled(token);
+      const chunkCount = Math.min(CHUNK_WORDS, verifyWords - wordIdx);
       const addr = startAddress + wordIdx * 4;
-      const actualWord = await dap.readMem32(addr);
+      const chunk = await dap.readBlock(addr, chunkCount);
 
-      for (let byteOffset = 0; byteOffset < 4; byteOffset++) {
-        const byteIdx = wordIdx * 4 + byteOffset;
-        if (byteIdx >= verifySize) {
-          break;
-        }
-        const actualByte = (actualWord >> (8 * byteOffset)) & 0xff;
-        const expectedByte = firmware[byteIdx];
-        if (actualByte !== expectedByte) {
-          mismatchCount++;
-          if (mismatchCount <= 5) {
-            log.warn(
-              `Verify mismatch at 0x${(startAddress + byteIdx).toString(16)}: ` +
-                `expected 0x${expectedByte.toString(16).padStart(2, '0')}, ` +
-                `got 0x${actualByte.toString(16).padStart(2, '0')}`
-            );
+      for (let i = 0; i < chunk.length; i++) {
+        const actualWord = chunk[i];
+        for (let byteOffset = 0; byteOffset < 4; byteOffset++) {
+          const byteIdx = (wordIdx + i) * 4 + byteOffset;
+          if (byteIdx >= verifySize) {
+            break;
+          }
+          const actualByte = (actualWord >>> (8 * byteOffset)) & 0xff;
+          const expectedByte = firmware[byteIdx];
+          if (actualByte !== expectedByte) {
+            mismatchCount++;
+            if (mismatchCount <= 5) {
+              log.warn(
+                `Verify mismatch at 0x${(startAddress + byteIdx).toString(16)}: ` +
+                  `expected 0x${expectedByte.toString(16).padStart(2, '0')}, ` +
+                  `got 0x${actualByte.toString(16).padStart(2, '0')}`
+              );
+            }
           }
         }
       }
 
-      if (wordIdx % 256 === 0 || wordIdx === verifyWords - 1) {
-        onProgress(((wordIdx + 1) / verifyWords) * 100);
-      }
-      if (wordIdx % 256 === 0) {
-        await sleep(0);
-      }
+      wordIdx += chunkCount;
+      onProgress((wordIdx / verifyWords) * 100);
     }
 
     if (mismatchCount > 0) {

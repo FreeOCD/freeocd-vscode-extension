@@ -260,7 +260,7 @@ async function rttConnect(ctx: McpToolContext, args: Record<string, unknown>): P
   }
   const target = ctx.targets.getCurrent();
   const { RttHandler } = await import('../rtt/rtt-handler');
-  const { adi } = ctx.connection.getDap();
+  const { proxy } = ctx.connection.getDap();
   const scanStart =
     typeof args.scanStart === 'number'
       ? (args.scanStart as number)
@@ -270,7 +270,7 @@ async function rttConnect(ctx: McpToolContext, args: Record<string, unknown>): P
 
   // DAPjs processor wrapper — we need a CortexM instance for RTT.
   const dapjs = loadDapjs();
-  const processor = new dapjs.CortexM(adi);
+  const processor = new dapjs.CortexM(proxy);
   const handler = new RttHandler(processor as never, { scanStartAddress: scanStart, scanRange });
   const count = await handler.init();
   if (count < 0) {
@@ -402,9 +402,9 @@ async function dispatchProcessor(
   if (!ctx.connection.isConnected()) {
     throw new NotConnectedError();
   }
-  const { adi } = ctx.connection.getDap();
+  const { proxy } = ctx.connection.getDap();
   const dapjs = loadDapjs();
-  const cortex = new dapjs.CortexM(adi) as {
+  const cortex = new dapjs.CortexM(proxy) as {
     getState(): Promise<unknown>;
     isHalted(): Promise<boolean>;
     halt(): Promise<void>;

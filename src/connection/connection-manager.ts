@@ -99,8 +99,18 @@ export class ConnectionManager extends EventEmitter {
       // that `webpack` copies from `vendor/dapjs/dist/`.
       const dapjs = loadDapjs();
       const proxy = new dapjs.CmsisDAP(transport, 0) as { connect: () => Promise<void> };
-      const adi = new dapjs.ADI(transport);
-      await proxy.connect();
+      // Wrap the CmsisDAP proxy so ADI (and anything derived from it) shares
+      // the same connection. Passing `transport` here would cause ADI to
+      // construct its own unconnected CmsisDAP internally.
+      const adi = new dapjs.ADI(proxy as never) as {
+        connect: () => Promise<void>;
+      };
+      // ADI.connect() performs CmsisDAP.connect() + DP power-up
+      // (CSYSPWRUPREQ / CDBGPWRUPREQ). Without the power-up step, raw
+      // DAP_Transfer operations to DP/AP will be silently dropped by the
+      // probe (count=0 in the response), so we must call ADI.connect() here
+      // rather than only proxy.connect().
+      await adi.connect();
 
       this.dap = { proxy, adi };
       this.updateState({ state: 'connected', method: this.backend.method, probe });
