@@ -1,0 +1,96 @@
+// VS Code Tool Set definitions for FreeOCD.
+//
+// How to install:
+//   1. Open Command Palette and run "Configure Tool Sets" -> "Create new tool sets file".
+//   2. Open this file (resources/tool-sets/freeocd.toolsets.jsonc) and copy its entire contents.
+//   3. Paste into the tool sets file VS Code opened in step 1 and save.
+//   4. Reference in chat as #freeocd-flash / #freeocd-rtt / #freeocd-target /
+//      #freeocd-low-level / #freeocd-session.
+//
+// See https://code.visualstudio.com/docs/copilot/chat/chat-agent-mode for
+// the general tool set documentation.
+{
+  "freeocd-flash": {
+    "tools": [
+      "flash_hex",
+      "verify_hex",
+      "recover",
+      "get_flash_progress",
+      "set_auto_flash_watch",
+      "soft_reset"
+    ],
+    "description": "FreeOCD flash / verify / recover operations",
+    "icon": "zap"
+  },
+  "freeocd-rtt": {
+    "tools": [
+      "rtt_connect",
+      "rtt_disconnect",
+      "rtt_read",
+      "rtt_write",
+      "get_rtt_status"
+    ],
+    "description": "FreeOCD SEGGER RTT debugging",
+    "icon": "terminal"
+  },
+  "freeocd-target": {
+    "tools": [
+      "list_targets",
+      "get_target_info",
+      "select_target",
+      "create_target_definition",
+      "update_target_definition",
+      "validate_target_definition",
+      "test_target_definition"
+    ],
+    "description": "FreeOCD target MCU management",
+    "icon": "chip"
+  },
+  "freeocd-low-level": {
+    "tools": [
+      "dap_info",
+      "dap_swj_clock",
+      "dap_swj_sequence",
+      "dap_transfer_configure",
+      "dap_connect",
+      "dap_disconnect",
+      "dap_reconnect",
+      "dap_reset",
+      "dap_read_dp",
+      "dap_write_dp",
+      "dap_read_ap",
+      "dap_write_ap",
+      "dap_read_mem8",
+      "dap_read_mem16",
+      "dap_read_mem32",
+      "dap_write_mem8",
+      "dap_write_mem16",
+      "dap_write_mem32",
+      "dap_read_block",
+      "dap_write_block",
+      "dap_read_bytes",
+      "dap_write_bytes",
+      "processor_get_state",
+      "processor_is_halted",
+      "processor_halt",
+      "processor_resume",
+      "processor_read_core_register",
+      "processor_read_core_registers",
+      "processor_write_core_register",
+      "processor_execute"
+    ],
+    "description": "FreeOCD low-level DAP / Cortex-M access",
+    "icon": "bug"
+  },
+  "freeocd-session": {
+    "tools": [
+      "describe_capabilities",
+      "get_session_log",
+      "get_command_history",
+      "get_last_error",
+      "clear_session_log"
+    ],
+    "description": "FreeOCD session diagnostics",
+    "icon": "history"
+  }
+}
