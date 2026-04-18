@@ -52,12 +52,14 @@
       {
         "command": "freeocd.connectProbe",
         "title": "%command.connectProbe%",
-        "category": "FreeOCD"
+        "category": "FreeOCD",
+        "icon": "$(plug)"
       },
       {
         "command": "freeocd.disconnectProbe",
         "title": "%command.disconnectProbe%",
-        "category": "FreeOCD"
+        "category": "FreeOCD",
+        "icon": "$(debug-disconnect)"
       },
       {
         "command": "freeocd.selectTargetMcu",
@@ -113,12 +115,14 @@
       {
         "command": "freeocd.disconnectRtt",
         "title": "%command.disconnectRtt%",
-        "category": "FreeOCD"
+        "category": "FreeOCD",
+        "icon": "$(debug-disconnect)"
       },
       {
         "command": "freeocd.openRttTerminal",
         "title": "%command.openRttTerminal%",
-        "category": "FreeOCD"
+        "category": "FreeOCD",
+        "icon": "$(output)"
       },
       {
         "command": "freeocd.setupMcp",
@@ -385,9 +389,24 @@
       ],
       "view/title": [
         {
+          "command": "freeocd.connectProbe",
+          "when": "view == freeocd-connection",
+          "group": "navigation@1"
+        },
+        {
+          "command": "freeocd.disconnectProbe",
+          "when": "view == freeocd-connection",
+          "group": "navigation@2"
+        },
+        {
           "command": "freeocd.refreshProbes",
           "when": "view == freeocd-connection",
-          "group": "navigation"
+          "group": "navigation@3"
+        },
+        {
+          "command": "freeocd.selectTargetMcu",
+          "when": "view == freeocd-target",
+          "group": "navigation@1"
         },
         {
           "command": "freeocd.flash",
@@ -402,6 +421,21 @@
         {
           "command": "freeocd.selectTargetMcu",
           "when": "view == freeocd-flasher",
+          "group": "navigation@3"
+        },
+        {
+          "command": "freeocd.connectRtt",
+          "when": "view == freeocd-debugger",
+          "group": "navigation@1"
+        },
+        {
+          "command": "freeocd.disconnectRtt",
+          "when": "view == freeocd-debugger",
+          "group": "navigation@2"
+        },
+        {
+          "command": "freeocd.openRttTerminal",
+          "when": "view == freeocd-debugger",
           "group": "navigation@3"
         }
       ]

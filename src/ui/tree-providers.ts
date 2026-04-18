@@ -96,7 +96,27 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<vscode.Tr
 // Target
 // ============================================================================
 
-export class TargetTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
+type TargetItemKind = 'info' | 'change';
+
+class TargetItem extends vscode.TreeItem {
+  constructor(
+    public readonly kind: TargetItemKind,
+    label: string,
+    description?: string,
+    command?: vscode.Command
+  ) {
+    super(label, vscode.TreeItemCollapsibleState.None);
+    if (description) {
+      this.description = description;
+    }
+    if (command) {
+      this.command = command;
+    }
+    this.contextValue = kind;
+  }
+}
+
+export class TargetTreeProvider implements vscode.TreeDataProvider<TargetItem> {
   private readonly emitter = new vscode.EventEmitter<void>();
   public readonly onDidChangeTreeData = this.emitter.event;
 
@@ -106,23 +126,36 @@ export class TargetTreeProvider implements vscode.TreeDataProvider<vscode.TreeIt
     this.emitter.fire();
   }
 
-  public getTreeItem(e: vscode.TreeItem): vscode.TreeItem {
+  public getTreeItem(e: TargetItem): vscode.TreeItem {
     return e;
   }
 
-  public getChildren(): vscode.TreeItem[] {
+  public getChildren(): TargetItem[] {
     const target = this.deps.current();
     if (!target) {
-      return [];
+      return [
+        new TargetItem(
+          'change',
+          vscode.l10n.t('Select Target MCU'),
+          undefined,
+          { command: 'freeocd.selectTargetMcu', title: '' }
+        )
+      ];
     }
     return [
-      labeled('Id', target.id),
-      labeled('Platform', target.platform),
-      labeled('CPU', target.cpu),
-      labeled('Flash address', target.flash.address),
-      labeled('Flash size', target.flash.size ?? '(unknown)'),
-      labeled('SRAM address', target.sram.address),
-      labeled('Capabilities', target.capabilities.join(', '))
+      new TargetItem('info', 'Id', target.id),
+      new TargetItem('info', 'Platform', target.platform),
+      new TargetItem('info', 'CPU', target.cpu),
+      new TargetItem('info', 'Flash address', target.flash.address),
+      new TargetItem('info', 'Flash size', target.flash.size ?? '(unknown)'),
+      new TargetItem('info', 'SRAM address', target.sram.address),
+      new TargetItem('info', 'Capabilities', target.capabilities.join(', ')),
+      new TargetItem(
+        'change',
+        vscode.l10n.t('Change Target'),
+        target.name,
+        { command: 'freeocd.selectTargetMcu', title: '' }
+      )
     ];
   }
 
