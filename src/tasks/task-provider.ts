@@ -21,6 +21,7 @@
 
 import * as vscode from 'vscode';
 import type { Flasher } from '../flasher/flasher';
+import type { TargetManager } from '../target/target-manager';
 import { FreeOcdError } from '../common/errors';
 import { log } from '../common/logger';
 
@@ -28,19 +29,32 @@ interface FreeocdTaskDefinition extends vscode.TaskDefinition {
   type: 'freeocd';
   action: 'flash' | 'verify' | 'recover';
   file?: string;
+  /**
+   * Optional target MCU id to temporarily select for this task run. If
+   * omitted, the currently selected target is used. The previous target is
+   * restored after the task completes.
+   */
+  target?: string;
   verify?: boolean;
 }
+
+type TaskScope = vscode.WorkspaceFolder | vscode.TaskScope;
 
 export class FreeocdTaskProvider implements vscode.TaskProvider {
   public static readonly taskType = 'freeocd';
 
-  constructor(private readonly flasher: Flasher) {}
+  constructor(
+    private readonly flasher: Flasher,
+    private readonly targets: TargetManager
+  ) {}
 
   public provideTasks(): vscode.ProviderResult<vscode.Task[]> {
+    const scope: TaskScope =
+      vscode.workspace.workspaceFolders?.[0] ?? vscode.TaskScope.Workspace;
     return [
-      this.buildTask({ type: 'freeocd', action: 'flash' }),
-      this.buildTask({ type: 'freeocd', action: 'verify' }),
-      this.buildTask({ type: 'freeocd', action: 'recover' })
+      this.buildTask({ type: 'freeocd', action: 'flash' }, scope),
+      this.buildTask({ type: 'freeocd', action: 'verify' }, scope),
+      this.buildTask({ type: 'freeocd', action: 'recover' }, scope)
     ];
   }
 
@@ -49,17 +63,25 @@ export class FreeocdTaskProvider implements vscode.TaskProvider {
     if (definition.type !== 'freeocd') {
       return undefined;
     }
-    return this.buildTask(definition);
+    // Preserve the user-declared scope (which may be a non-first workspace
+    // folder in a multi-root workspace) so relative paths resolve against
+    // the correct folder.
+    const scope: TaskScope =
+      (task.scope as TaskScope | undefined) ??
+      vscode.workspace.workspaceFolders?.[0] ??
+      vscode.TaskScope.Workspace;
+    return this.buildTask(definition, scope);
   }
 
-  private buildTask(def: FreeocdTaskDefinition): vscode.Task {
-    const scope = vscode.workspace.workspaceFolders?.[0] ?? vscode.TaskScope.Workspace;
+  private buildTask(def: FreeocdTaskDefinition, scope: TaskScope): vscode.Task {
     const task = new vscode.Task(
       def,
       scope,
       `${def.action}${def.file ? ` ${def.file}` : ''}`,
       FreeocdTaskProvider.taskType,
-      new vscode.CustomExecution(async () => this.createTerminal(def))
+      new vscode.CustomExecution(async () =>
+        new FreeocdTaskTerminal(def, scope, this.flasher, this.targets)
+      )
     );
     task.presentationOptions = {
       reveal: vscode.TaskRevealKind.Silent,
@@ -67,10 +89,6 @@ export class FreeocdTaskProvider implements vscode.TaskProvider {
       clear: false
     };
     return task;
-  }
-
-  private async createTerminal(def: FreeocdTaskDefinition): Promise<vscode.Pseudoterminal> {
-    return new FreeocdTaskTerminal(def, this.flasher);
   }
 }
 
@@ -80,7 +98,12 @@ class FreeocdTaskTerminal implements vscode.Pseudoterminal {
   public readonly onDidWrite = this.writeEmitter.event;
   public readonly onDidClose = this.closeEmitter.event;
 
-  constructor(private readonly def: FreeocdTaskDefinition, private readonly flasher: Flasher) {}
+  constructor(
+    private readonly def: FreeocdTaskDefinition,
+    private readonly scope: TaskScope,
+    private readonly flasher: Flasher,
+    private readonly targets: TargetManager
+  ) {}
 
   public open(): void {
     void this.run();
@@ -92,7 +115,15 @@ class FreeocdTaskTerminal implements vscode.Pseudoterminal {
   }
 
   private async run(): Promise<void> {
+    // If the task specifies a target, temporarily select it for the task
+    // duration and restore the previous selection afterwards.
+    const previousTarget = this.targets.getCurrent();
+    let targetOverridden = false;
     try {
+      if (this.def.target && this.def.target !== previousTarget?.id) {
+        this.targets.select(this.def.target);
+        targetOverridden = true;
+      }
       switch (this.def.action) {
         case 'flash':
           await this.flasher.flash(this.resolveFile(), {
@@ -117,6 +148,16 @@ class FreeocdTaskTerminal implements vscode.Pseudoterminal {
       this.writeLine(`Error: ${message}`);
       log.error(err as Error);
       this.closeEmitter.fire(1);
+    } finally {
+      if (targetOverridden && previousTarget) {
+        try {
+          this.targets.select(previousTarget.id);
+        } catch (restoreErr) {
+          log.warn(
+            `Failed to restore previous target after task: ${(restoreErr as Error).message}`
+          );
+        }
+      }
     }
   }
 
@@ -128,11 +169,27 @@ class FreeocdTaskTerminal implements vscode.Pseudoterminal {
         'MISSING_FILE'
       );
     }
-    const folder = vscode.workspace.workspaceFolders?.[0];
-    if (folder && !file.startsWith('/') && !/^[a-zA-Z]:[\\/]/u.test(file)) {
+    // Absolute paths bypass the scope lookup.
+    if (file.startsWith('/') || /^[a-zA-Z]:[\\/]/u.test(file)) {
+      return vscode.Uri.file(file);
+    }
+    const folder = this.scopeFolder();
+    if (folder) {
       return vscode.Uri.joinPath(folder.uri, file);
     }
     return vscode.Uri.file(file);
+  }
+
+  /**
+   * Resolve the workspace folder associated with this task's scope. In a
+   * multi-root workspace this is the folder that declared the task, which
+   * is the correct anchor for relative paths.
+   */
+  private scopeFolder(): vscode.WorkspaceFolder | undefined {
+    if (typeof this.scope === 'object') {
+      return this.scope;
+    }
+    return vscode.workspace.workspaceFolders?.[0];
   }
 
   private writeLine(text: string): void {

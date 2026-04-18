@@ -43,6 +43,14 @@ export function parseIntelHex(hex: string): ParsedHex {
       continue;
     }
 
+    // Every HEX record encodes an even number of hex chars after the colon
+    // (each byte is exactly 2 chars). An odd count indicates a truncated
+    // record, which we reject up front so we surface a useful error rather
+    // than letting a later checksum mismatch mask it.
+    if (((line.length - 1) & 1) !== 0) {
+      throw new HexParseError(`Record has odd hex character count: ${line}`);
+    }
+
     const bytes: number[] = [];
     for (let i = 1; i < line.length; i += 2) {
       const byte = parseInt(line.substr(i, 2), 16);
@@ -59,6 +67,16 @@ export function parseIntelHex(hex: string): ParsedHex {
     const byteCount = bytes[0];
     const address = (bytes[1] << 8) | bytes[2];
     const recordType = bytes[3];
+
+    // A HEX record is <byteCount> <addrHi> <addrLo> <type> <data...> <checksum>,
+    // i.e. exactly `5 + byteCount` bytes. Reject truncated / overlong records
+    // up-front instead of silently slicing past the end of `bytes`.
+    if (bytes.length !== 5 + byteCount) {
+      throw new HexParseError(
+        `Record length mismatch: declared byteCount=${byteCount} but payload has ${bytes.length - 5} bytes: ${line}`
+      );
+    }
+
     const recordData = bytes.slice(4, 4 + byteCount);
 
     // Verify checksum.
@@ -88,9 +106,19 @@ export function parseIntelHex(hex: string): ParsedHex {
       case 0x01:
         break;
       case 0x02:
+        if (recordData.length !== 2) {
+          throw new HexParseError(
+            `Extended segment address record must contain 2 data bytes: ${line}`
+          );
+        }
         extendedAddress = ((recordData[0] << 8) | recordData[1]) << 4;
         break;
       case 0x04:
+        if (recordData.length !== 2) {
+          throw new HexParseError(
+            `Extended linear address record must contain 2 data bytes: ${line}`
+          );
+        }
         extendedAddress = ((recordData[0] << 8) | recordData[1]) << 16;
         break;
       case 0x03:

@@ -102,7 +102,9 @@ export class ConnectionManager extends EventEmitter {
       // Wrap the CmsisDAP proxy so ADI (and anything derived from it) shares
       // the same connection. Passing `transport` here would cause ADI to
       // construct its own unconnected CmsisDAP internally.
-      const adi = new dapjs.ADI(proxy as never) as {
+      // ADI accepts either a raw transport or a wrapping CmsisDAP proxy;
+      // the `DapjsModule` type declares this union so we don't need a cast.
+      const adi = new dapjs.ADI(proxy as object) as {
         connect: () => Promise<void>;
       };
       // ADI.connect() performs CmsisDAP.connect() + DP power-up

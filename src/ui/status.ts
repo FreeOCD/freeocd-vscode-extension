@@ -19,14 +19,14 @@ export class StatusManager implements vscode.Disposable {
 
   constructor() {
     this.probeStatus = vscode.languages.createLanguageStatusItem('freeocd.probe', '*');
-    this.probeStatus.name = 'FreeOCD Probe';
+    this.probeStatus.name = vscode.l10n.t('FreeOCD Probe');
     this.probeStatus.text = vscode.l10n.t('Probe') + ': ' + vscode.l10n.t('Not connected');
     this.probeStatus.accessibilityInformation = {
       label: vscode.l10n.t('FreeOCD probe not connected')
     };
 
     this.targetStatus = vscode.languages.createLanguageStatusItem('freeocd.target', '*');
-    this.targetStatus.name = 'FreeOCD Target';
+    this.targetStatus.name = vscode.l10n.t('FreeOCD Target');
     this.targetStatus.text = vscode.l10n.t('Target') + ': ' + vscode.l10n.t('Not selected');
     this.targetStatus.accessibilityInformation = {
       label: vscode.l10n.t('FreeOCD target not selected')
@@ -65,13 +65,14 @@ export class StatusManager implements vscode.Disposable {
       case 'connecting':
         this.probeStatus.text = '$(sync~spin) ' + vscode.l10n.t('Connecting to probe...');
         this.probeStatus.severity = vscode.LanguageStatusSeverity.Information;
-        this.bar.text = '$(sync~spin) FreeOCD: connecting...';
+        this.bar.text = '$(sync~spin) FreeOCD: ' + vscode.l10n.t('Connecting to probe...');
         break;
       case 'error':
-        this.probeStatus.text = '$(error) ' + vscode.l10n.t('Probe') + ': error';
+        this.probeStatus.text =
+          '$(error) ' + vscode.l10n.t('Probe') + ': ' + vscode.l10n.t('error');
         this.probeStatus.severity = vscode.LanguageStatusSeverity.Error;
         this.probeStatus.accessibilityInformation = {
-          label: info.error ?? 'Probe error'
+          label: info.error ?? vscode.l10n.t('Probe error')
         };
         this.bar.text = '$(error) FreeOCD';
         break;

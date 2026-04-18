@@ -66,15 +66,19 @@ export class Flasher {
         this.emit({ requestId, phase: 'preparing', percent: 0 });
         let lastPct = 0;
         const onProgress = (pct: number, message?: string): void => {
-          const delta = pct - lastPct;
+          // Clamp to monotonically non-decreasing percentages so a transient
+          // regression in reported progress does not cause us to
+          // over-report the next increment.
+          const clamped = pct > lastPct ? pct : lastPct;
+          const delta = clamped - lastPct;
           if (delta > 0) {
             progress.report({ increment: delta, message });
           }
-          lastPct = pct;
+          lastPct = clamped;
           this.emit({
             requestId,
             phase: 'writing',
-            percent: pct,
+            percent: clamped,
             message,
             bytesTotal: hex.size
           });
@@ -132,12 +136,13 @@ export class Flasher {
         const token = toCancellable(vsToken);
         let lastPct = 0;
         const onProgress = (pct: number): void => {
-          const delta = pct - lastPct;
+          const clamped = pct > lastPct ? pct : lastPct;
+          const delta = clamped - lastPct;
           if (delta > 0) {
             progress.report({ increment: delta });
           }
-          lastPct = pct;
-          this.emit({ requestId, phase: 'verifying', percent: pct, bytesTotal: hex.size });
+          lastPct = clamped;
+          this.emit({ requestId, phase: 'verifying', percent: clamped, bytesTotal: hex.size });
         };
         try {
           const result = await handler.verify(dap, hex.data, hex.startAddress, onProgress, token);
@@ -182,12 +187,13 @@ export class Flasher {
         const token = toCancellable(vsToken);
         let lastPct = 0;
         const onProgress = (pct: number, message?: string): void => {
-          const delta = pct - lastPct;
+          const clamped = pct > lastPct ? pct : lastPct;
+          const delta = clamped - lastPct;
           if (delta > 0) {
             progress.report({ increment: delta, message });
           }
-          lastPct = pct;
-          this.emit({ requestId, phase: 'erasing', percent: pct, message });
+          lastPct = clamped;
+          this.emit({ requestId, phase: 'erasing', percent: clamped, message });
         };
         try {
           await handler.recover(dap, onProgress, token);

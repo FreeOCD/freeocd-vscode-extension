@@ -54,9 +54,18 @@ if (!IPC_DIR) {
   process.exit(2);
 }
 
-const REQUEST_FILE = path.join(IPC_DIR, 'request.json');
-const RESPONSE_FILE = path.join(IPC_DIR, 'response.json');
+// Per-request filenames so concurrent tool calls don't clobber each other.
+// The extension-side `McpBridge` watches `request-*.json` and writes the
+// matching `response-<requestId>.json`.
 const STATUS_FILE = path.join(IPC_DIR, 'status.json');
+
+function requestFileFor(requestId: string): string {
+  return path.join(IPC_DIR!, `request-${requestId}.json`);
+}
+
+function responseFileFor(requestId: string): string {
+  return path.join(IPC_DIR!, `response-${requestId}.json`);
+}
 
 const ALL_TOOLS: ToolDefinition[] = [
   ...connectionTools,
@@ -79,7 +88,7 @@ const SERVER_INSTRUCTIONS = [
   '  5. `flash_hex` → `verify_hex`',
   '',
   'Tools are grouped into Tool Sets:',
-  '  - #freeocd-flash    (flash / verify / recover / set_auto_flash_watch / soft_reset)',
+  '  - #freeocd-flash    (flash / verify / recover / get_flash_progress / set_auto_flash_watch / soft_reset)',
   '  - #freeocd-rtt      (rtt_connect / rtt_read / rtt_write / get_rtt_status)',
   '  - #freeocd-target   (list_targets / get_target_info / create_target_definition / ...)',
   '  - #freeocd-low-level (dap_* / processor_*)',
@@ -260,25 +269,29 @@ async function forwardRequest(tool: string, args: unknown): Promise<unknown> {
     args: args as Record<string, unknown>,
     timestamp: new Date().toISOString()
   };
-
-  // Reset response file so we don't read a stale one.
-  try {
-    fs.unlinkSync(RESPONSE_FILE);
-  } catch {
-    // missing is fine
-  }
+  const requestFile = requestFileFor(requestId);
+  const responseFile = responseFileFor(requestId);
+  const requestTmp = `${requestFile}.tmp`;
 
   fs.mkdirSync(IPC_DIR!, { recursive: true });
-  fs.writeFileSync(REQUEST_FILE, JSON.stringify(req, null, 2));
+  // Atomic write of the request: write to a sibling tmp file, then rename.
+  // This ensures the extension's watcher never reads a partial JSON document
+  // (which would previously force a fragile "Unexpected" error retry loop).
+  fs.writeFileSync(requestTmp, JSON.stringify(req, null, 2));
+  fs.renameSync(requestTmp, requestFile);
 
-  const deadline = Date.now() + REQUEST_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    await sleep(50);
-    if (fs.existsSync(RESPONSE_FILE)) {
+  try {
+    const deadline = Date.now() + REQUEST_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      await sleep(50);
+      if (!fs.existsSync(responseFile)) {
+        continue;
+      }
       try {
-        const raw = fs.readFileSync(RESPONSE_FILE, 'utf8');
+        const raw = fs.readFileSync(responseFile, 'utf8');
         const resp = JSON.parse(raw) as ForwardResponse;
         if (resp.requestId !== requestId) {
+          // Defensive: file should always match because it's uniquely named.
           continue;
         }
         if (!resp.success) {
@@ -287,15 +300,29 @@ async function forwardRequest(tool: string, args: unknown): Promise<unknown> {
         }
         return resp.result;
       } catch (err) {
-        // If we caught a JSON parse error (file was being written), retry.
-        if ((err as Error).message.startsWith('Unexpected')) {
+        // Partial read during the extension's atomic rename is unlikely but
+        // possible on unusual filesystems — retry on JSON parse errors.
+        const message = (err as Error).message;
+        if (
+          message.startsWith('Unexpected') ||
+          message.includes('JSON')
+        ) {
           continue;
         }
         throw err;
       }
     }
+    throw new Error(`Timed out waiting for extension host response for ${tool}`);
+  } finally {
+    // Best-effort cleanup so stale files don't accumulate in IPC_DIR.
+    for (const file of [responseFile, requestFile, requestTmp]) {
+      try {
+        fs.unlinkSync(file);
+      } catch {
+        // Already gone (extension host or previous iteration cleaned it up).
+      }
+    }
   }
-  throw new Error(`Timed out waiting for extension host response for ${tool}`);
 }
 
 function sleep(ms: number): Promise<void> {

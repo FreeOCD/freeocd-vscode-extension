@@ -48,34 +48,54 @@ let KNOWN_CMSIS_DAP_VENDOR_IDS: number[] = [];
 /**
  * Initialize vendor ID filter from JSON file.
  * This must be called after the extension context is available.
+ *
+ * `probe-filters.json` is copied by webpack's `CopyWebpackPlugin` into
+ * `out/probe-filters.json` for packaged VSIXs. When running from source
+ * (extension development host) the file also lives at
+ * `resources/probe-filters.json`, so we try both locations.
  */
 export function initProbeFilters(extensionPath: string): void {
-  let filtersPath: string;
-  let loaded = false;
+  const candidates = [
+    join(extensionPath, 'out', 'probe-filters.json'),
+    join(extensionPath, 'resources', 'probe-filters.json')
+  ];
 
-  // Try production path first (out/probe-filters.json)
-  try {
-    filtersPath = join(extensionPath, 'probe-filters.json');
-    const filtersData = JSON.parse(readFileSync(filtersPath, 'utf-8'));
-    if (filtersData.vendorIds && Array.isArray(filtersData.vendorIds)) {
-      KNOWN_CMSIS_DAP_VENDOR_IDS = filtersData.vendorIds.map((vid: string) => parseInt(vid, 16));
-      log.info(`Loaded ${KNOWN_CMSIS_DAP_VENDOR_IDS.length} CMSIS-DAP vendor IDs: ${KNOWN_CMSIS_DAP_VENDOR_IDS.map(vid => '0x' + vid.toString(16)).join(', ')}`);
-      loaded = true;
-    }
-  } catch (err) {
-    // Try development path (resources/probe-filters.json)
-    try {
-      filtersPath = join(extensionPath, 'resources/probe-filters.json');
-      const filtersData = JSON.parse(readFileSync(filtersPath, 'utf-8'));
-      if (filtersData.vendorIds && Array.isArray(filtersData.vendorIds)) {
-        KNOWN_CMSIS_DAP_VENDOR_IDS = filtersData.vendorIds.map((vid: string) => parseInt(vid, 16));
-        log.info(`Loaded ${KNOWN_CMSIS_DAP_VENDOR_IDS.length} CMSIS-DAP vendor IDs: ${KNOWN_CMSIS_DAP_VENDOR_IDS.map(vid => '0x' + vid.toString(16)).join(', ')}`);
-        loaded = true;
-      }
-    } catch (devErr) {
-      log.warn(`Failed to load probe-filters.json from both production and development paths. Vendor ID filtering will be disabled.`);
+  for (const filtersPath of candidates) {
+    if (tryLoadProbeFilters(filtersPath)) {
+      return;
     }
   }
+
+  log.warn(
+    'Failed to load probe-filters.json from any known location ' +
+      `(${candidates.join(', ')}). Vendor ID filtering will be disabled.`
+  );
+}
+
+function tryLoadProbeFilters(filtersPath: string): boolean {
+  let raw: string;
+  try {
+    raw = readFileSync(filtersPath, 'utf-8');
+  } catch {
+    return false;
+  }
+  let filtersData: unknown;
+  try {
+    filtersData = JSON.parse(raw);
+  } catch (err) {
+    log.warn(`probe-filters.json at ${filtersPath} is not valid JSON: ${(err as Error).message}`);
+    return false;
+  }
+  const vendorIds = (filtersData as { vendorIds?: unknown }).vendorIds;
+  if (!Array.isArray(vendorIds)) {
+    return false;
+  }
+  KNOWN_CMSIS_DAP_VENDOR_IDS = vendorIds.map((vid) => parseInt(String(vid), 16));
+  log.info(
+    `Loaded ${KNOWN_CMSIS_DAP_VENDOR_IDS.length} CMSIS-DAP vendor IDs from ${filtersPath}: ` +
+      KNOWN_CMSIS_DAP_VENDOR_IDS.map((vid) => '0x' + vid.toString(16)).join(', ')
+  );
+  return true;
 }
 
 /**

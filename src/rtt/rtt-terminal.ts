@@ -101,7 +101,12 @@ export class RttTerminal implements vscode.Pseudoterminal {
     try {
       const bytes = await this.rtt.read(0);
       if (bytes.length > 0) {
-        const text = this.decoder.decode(bytes, { stream: true }).replace(/\n/gu, '\r\n');
+        // Only translate bare LF to CRLF — if the firmware already emits
+        // CRLF sequences, the negative lookbehind prevents us from turning
+        // them into CR CR LF and producing extra blank lines.
+        const text = this.decoder
+          .decode(bytes, { stream: true })
+          .replace(/(?<!\r)\n/gu, '\r\n');
         this.writeEmitter.fire(text);
       }
       if (this.inputBuffer.length > 0) {

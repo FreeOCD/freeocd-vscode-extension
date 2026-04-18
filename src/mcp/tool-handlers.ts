@@ -25,6 +25,7 @@ import { targetTools } from './tools/target-tools';
 import { flashTools } from './tools/flash-tools';
 import { rttTools } from './tools/rtt-tools';
 import { dapTools } from './tools/dap-tools';
+import { processorTools } from './tools/processor-tools';
 import { sessionTools } from './tools/session-tools';
 import { readAPReg } from '../dap/dap-operations';
 import { FreeOcdError, NotConnectedError, NoTargetError } from '../common/errors';
@@ -50,6 +51,7 @@ const ALL_TOOLS: ToolDefinition[] = [
   ...flashTools,
   ...rttTools,
   ...dapTools,
+  ...processorTools,
   ...sessionTools
 ];
 

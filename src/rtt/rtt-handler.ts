@@ -46,7 +46,13 @@ export interface RttOptions {
   scanStride?: number;
 }
 
-const RTT_SIGNATURE_HEX = '53454747455220525454'; // "SEGGER RTT"
+// "SEGGER RTT" as raw bytes. We search the byte stream directly rather than
+// a hex string, so the match offset cannot fall on a nibble boundary
+// (`indexOf` on a hex string can match at odd indices, which would yield a
+// non-integer byte offset and an incorrect control-block address).
+const RTT_SIGNATURE_BYTES = new Uint8Array([
+  0x53, 0x45, 0x47, 0x47, 0x45, 0x52, 0x20, 0x52, 0x54, 0x54
+]); // "SEGGER RTT"
 
 export class RttHandler {
   private readonly scanStartAddress: number;
@@ -87,7 +93,7 @@ export class RttHandler {
           this.scanBlockSize / 4
         );
         const data = new Uint8Array(data32.buffer);
-        const sigIndex = toHexString(data).indexOf(RTT_SIGNATURE_HEX) / 2;
+        const sigIndex = indexOfBytes(data, RTT_SIGNATURE_BYTES);
         if (sigIndex >= 0) {
           this.rttCtrlAddr = this.scanStartAddress + offset + sigIndex;
           log.info(`RTT control block found at 0x${this.rttCtrlAddr.toString(16)}`);
@@ -169,8 +175,11 @@ export class RttHandler {
     buf.wrOff = await this.processor.readMem32(buf.bufAddr + 12);
 
     let numAvail: number;
+    // Per the SEGGER RTT ring-buffer protocol, one byte must always remain
+    // free so the empty state (wrOff == rdOff) is distinguishable from the
+    // full state. Both branches therefore subtract 1.
     if (buf.wrOff >= buf.rdOff) {
-      numAvail = buf.sizeOfBuffer - (buf.wrOff - buf.rdOff);
+      numAvail = buf.sizeOfBuffer - (buf.wrOff - buf.rdOff) - 1;
     } else {
       numAvail = buf.rdOff - buf.wrOff - 1;
     }
@@ -210,10 +219,23 @@ function parseBuffer(dv: DataView, bufOffset: number, baseAddr: number): RttBuff
   };
 }
 
-function toHexString(byteArray: Uint8Array): string {
-  let out = '';
-  for (let i = 0; i < byteArray.length; i++) {
-    out += ('0' + (byteArray[i] & 0xff).toString(16)).slice(-2);
+/**
+ * Byte-wise search: return the first index in `haystack` where `needle` is
+ * found, or -1 if not present. Unlike converting to a hex string and running
+ * `indexOf`, this guarantees byte-aligned matches.
+ */
+function indexOfBytes(haystack: Uint8Array, needle: Uint8Array): number {
+  if (needle.length === 0 || haystack.length < needle.length) {
+    return -1;
   }
-  return out;
+  const end = haystack.length - needle.length;
+  outer: for (let i = 0; i <= end; i++) {
+    for (let j = 0; j < needle.length; j++) {
+      if (haystack[i + j] !== needle[j]) {
+        continue outer;
+      }
+    }
+    return i;
+  }
+  return -1;
 }

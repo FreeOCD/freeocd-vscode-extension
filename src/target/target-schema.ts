@@ -54,7 +54,16 @@ const memoryRegion = z
 
 export const targetDefinitionSchema = z
   .object({
-    id: z.string().min(3),
+    // Target ids must be of the form "<namespace>/<family>/<name>" with exactly
+    // three lowercase path segments. `TargetManager.save()` splits the id on
+    // "/" and refuses anything else, so we enforce the same shape at schema
+    // validation time for consistency with the published JSON Schema.
+    id: z
+      .string()
+      .regex(
+        /^[a-z0-9_]+\/[a-z0-9_]+\/[a-z0-9_]+$/u,
+        'Target id must be "<namespace>/<family>/<name>" (exactly three path segments, lowercase snake_case).'
+      ),
     name: z.string().min(1),
     platform: z.string().min(1),
     cpu: z.string().min(1),

@@ -77,13 +77,17 @@ export class ConnectionTreeProvider implements vscode.TreeDataProvider<vscode.Tr
       return [];
     }
     const items: vscode.TreeItem[] = [];
-    items.push(labeled('Product', info.probe.product ?? '(unknown)'));
-    items.push(labeled('Vendor', `0x${info.probe.vendorId.toString(16)}`));
-    items.push(labeled('Product ID', `0x${info.probe.productId.toString(16)}`));
+    items.push(
+      labeled(vscode.l10n.t('Product'), info.probe.product ?? vscode.l10n.t('(unknown)'))
+    );
+    items.push(labeled(vscode.l10n.t('Vendor'), `0x${info.probe.vendorId.toString(16)}`));
+    items.push(
+      labeled(vscode.l10n.t('Product ID'), `0x${info.probe.productId.toString(16)}`)
+    );
     if (info.probe.serialNumber) {
-      items.push(labeled('Serial', info.probe.serialNumber));
+      items.push(labeled(vscode.l10n.t('Serial'), info.probe.serialNumber));
     }
-    items.push(labeled('Transport', info.method));
+    items.push(labeled(vscode.l10n.t('Transport'), info.method));
     return items;
   }
 
@@ -136,20 +140,23 @@ export class TargetTreeProvider implements vscode.TreeDataProvider<TargetItem> {
       return [
         new TargetItem(
           'change',
-          vscode.l10n.t('Select Target MCU'),
+          // Reuse the existing "Select a target MCU" key so this label is
+          // translated consistently with the QuickPick placeholder.
+          vscode.l10n.t('Select a target MCU'),
           undefined,
           { command: 'freeocd.selectTargetMcu', title: '' }
         )
       ];
     }
+    const unknown = vscode.l10n.t('(unknown)');
     return [
-      new TargetItem('info', 'Id', target.id),
-      new TargetItem('info', 'Platform', target.platform),
-      new TargetItem('info', 'CPU', target.cpu),
-      new TargetItem('info', 'Flash address', target.flash.address),
-      new TargetItem('info', 'Flash size', target.flash.size ?? '(unknown)'),
-      new TargetItem('info', 'SRAM address', target.sram.address),
-      new TargetItem('info', 'Capabilities', target.capabilities.join(', ')),
+      new TargetItem('info', vscode.l10n.t('Id'), target.id),
+      new TargetItem('info', vscode.l10n.t('Platform'), target.platform),
+      new TargetItem('info', vscode.l10n.t('CPU'), target.cpu),
+      new TargetItem('info', vscode.l10n.t('Flash address'), target.flash.address),
+      new TargetItem('info', vscode.l10n.t('Flash size'), target.flash.size ?? unknown),
+      new TargetItem('info', vscode.l10n.t('SRAM address'), target.sram.address),
+      new TargetItem('info', vscode.l10n.t('Capabilities'), target.capabilities.join(', ')),
       new TargetItem(
         'change',
         vscode.l10n.t('Change Target'),
@@ -272,11 +279,11 @@ export class DebuggerTreeProvider implements vscode.TreeDataProvider<vscode.Tree
       return [];
     }
     return [
-      labeled('State', 'connected'),
-      labeled('Up buffers', String(state.numBufUp)),
-      labeled('Down buffers', String(state.numBufDown)),
+      labeled(vscode.l10n.t('State'), vscode.l10n.t('connected')),
+      labeled(vscode.l10n.t('Up buffers'), String(state.numBufUp)),
+      labeled(vscode.l10n.t('Down buffers'), String(state.numBufDown)),
       labeled(
-        'Control block',
+        vscode.l10n.t('Control block'),
         state.controlBlockAddress !== undefined
           ? `0x${state.controlBlockAddress.toString(16)}`
           : '?'
@@ -312,7 +319,7 @@ export class McpStatusTreeProvider implements vscode.TreeDataProvider<vscode.Tre
     if (!summary) {
       return [];
     }
-    return [labeled('Last', summary)];
+    return [labeled(vscode.l10n.t('Last'), summary)];
   }
 
   public dispose(): void {

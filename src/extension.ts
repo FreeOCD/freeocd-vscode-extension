@@ -135,7 +135,27 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const ipcDir = vscode.Uri.joinPath(context.storageUri, 'mcp-ipc');
   const bridge = new McpBridge(ipcDir, sessionLog);
   const flashProgress = new Map<string, FlashProgress>();
-  flasher.onDidReportProgress((p) => flashProgress.set(p.requestId, p));
+  // Cap the map size so long-running sessions don't grow it unbounded; we
+  // also actively evict terminal ('done' / 'error') entries after a short
+  // grace period so `get_flash_progress` can still observe the last known
+  // status for a brief window before the entry disappears.
+  const FLASH_PROGRESS_MAX = 256;
+  const FLASH_PROGRESS_TTL_MS = 60_000;
+  flasher.onDidReportProgress((p) => {
+    flashProgress.set(p.requestId, p);
+    if (flashProgress.size > FLASH_PROGRESS_MAX) {
+      const oldestKey = flashProgress.keys().next().value;
+      if (oldestKey !== undefined) {
+        flashProgress.delete(oldestKey);
+      }
+    }
+    if (p.phase === 'done' || p.phase === 'error') {
+      const id = p.requestId;
+      setTimeout(() => {
+        flashProgress.delete(id);
+      }, FLASH_PROGRESS_TTL_MS).unref?.();
+    }
+  });
 
   const mcpContext: McpToolContext = {
     connection,
@@ -231,7 +251,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Tasks provider
   // --------------------------------------------------------------------------
   context.subscriptions.push(
-    vscode.tasks.registerTaskProvider(FreeocdTaskProvider.taskType, new FreeocdTaskProvider(flasher))
+    vscode.tasks.registerTaskProvider(
+      FreeocdTaskProvider.taskType,
+      new FreeocdTaskProvider(flasher, targets)
+    )
   );
 
   // --------------------------------------------------------------------------
