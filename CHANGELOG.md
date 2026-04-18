@@ -42,8 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   selected one.
 - Tasks API provider (`freeocd` task type) supporting flash / verify /
   recover from `tasks.json`.
-- i18n for English (`bundle.l10n.json`) and Japanese (`bundle.l10n.ja.json`)
-  plus `package.nls.json` and `package.nls.ja.json`.
+- i18n for English (`bundle.l10n.json`), Japanese (`bundle.l10n.ja.json`),
+  Simplified Chinese (`bundle.l10n.zh-cn.json`), and Traditional Chinese
+  (`bundle.l10n.zh-tw.json`) plus the matching `package.nls.*.json` files.
 - GitHub Actions workflows:
   - `ci.yml` — lint, typecheck, target JSON validation, 3 OS × 2 Node matrix
     build + test with `node-hid` verification.

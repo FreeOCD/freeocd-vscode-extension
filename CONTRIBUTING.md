@@ -88,7 +88,8 @@ scripts/
 - **TypeScript strict mode** — avoid `any`; use `unknown` with narrowing.
 - **English** comments and docstrings in source files (per user rule).
 - Localise **all** user-visible strings with `vscode.l10n.t(...)` and keep
-  `l10n/bundle.l10n.json` + `l10n/bundle.l10n.ja.json` in sync.
+  `l10n/bundle.l10n.json`, `l10n/bundle.l10n.ja.json`,
+  `l10n/bundle.l10n.zh-cn.json`, and `l10n/bundle.l10n.zh-tw.json` in sync.
 
 ## Adding a new target MCU
 
