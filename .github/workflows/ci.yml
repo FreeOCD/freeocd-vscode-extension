@@ -60,10 +60,7 @@ jobs:
       - name: Install deps
         run: npm ci
       - name: Build DAPjs (vendor/dapjs)
-        run: |
-          cd vendor/dapjs
-          npm install --no-save
-          npm run build
+        run: npm run build:dapjs
       - name: Verify node-hid native binding
         shell: bash
         run: |

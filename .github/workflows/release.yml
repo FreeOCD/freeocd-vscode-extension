@@ -31,10 +31,7 @@ jobs:
       - name: Install deps
         run: npm ci
       - name: Build DAPjs
-        run: |
-          cd vendor/dapjs
-          npm install --no-save
-          npm run build
+        run: npm run build:dapjs
       - name: ESLint
         run: npm run lint
       - name: TypeScript typecheck
@@ -97,10 +94,7 @@ jobs:
       - name: Install deps
         run: npm ci
       - name: Build DAPjs
-        run: |
-          cd vendor/dapjs
-          npm install --no-save
-          npm run build
+        run: npm run build:dapjs
       - name: Verify node-hid native binding
         if: '!matrix.cross'
         shell: bash
