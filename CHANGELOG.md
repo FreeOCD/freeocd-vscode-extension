@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-04-19
+
+### Changed
+
+- Add icon to `selectHexFile` command for better visual feedback
+- Make HEX File tree item clickable to open file selector
+- Reorder flasher view menu items for better UX (select, flash, recover)
+
 ## [0.0.1] - 2026-04-18
 
 ### Added
@@ -61,5 +69,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `activationEvents` is intentionally minimal (`onStartupFinished`); VS Code
   implicitly activates on commands / views / taskDefinitions / MCP providers.
 
-[Unreleased]: https://github.com/FreeOCD/freeocd-vscode-extension/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/FreeOCD/freeocd-vscode-extension/compare/v0.0.2...HEAD
+[0.0.2]: https://github.com/FreeOCD/freeocd-vscode-extension/releases/tag/v0.0.2
 [0.0.1]: https://github.com/FreeOCD/freeocd-vscode-extension/releases/tag/v0.0.1
