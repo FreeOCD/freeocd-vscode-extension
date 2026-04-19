@@ -66,180 +66,138 @@ export class Flasher {
 
   /**
    * Flash a .hex file with progress UI and cancellation support.
+   *
+   * When `verifyAfterFlash` is enabled, a second progress notification is
+   * opened for the verify phase so its progress bar and timing information
+   * are actually visible to the user (the original in-line verify re-used
+   * the flash progress UI that was already at 100%, making the verify phase
+   * appear frozen).
    */
   public async flash(
     uri: vscode.Uri,
     options: { verifyAfterFlash?: boolean; requestId?: string } = {}
   ): Promise<void> {
     return this.runExclusive('flash', async () => {
-    const requestId = options.requestId ?? genId();
-    const hex = await this.loadHex(uri);
+      const requestId = options.requestId ?? genId();
+      const hex = await this.loadHex(uri);
 
-    await vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: vscode.l10n.t('Flashing {0} ({1} bytes)...', basename(uri), hex.size),
-        cancellable: true
-      },
-      async (progress, vsToken) => {
-        const token = toCancellable(vsToken);
-        const handler = this.deps.getHandler();
-        const dap = this.deps.getDap();
-        const started = Date.now();
+      // Phase 1: write image with its own progress UI.
+      await this.runFlashWithProgress(uri, hex, requestId);
 
-        this.emit({ requestId, phase: 'preparing', percent: 0 });
-        let lastPct = 0;
-        const onProgress = (pct: number, message?: string): void => {
-          // Clamp to monotonically non-decreasing percentages so a transient
-          // regression in reported progress does not cause us to
-          // over-report the next increment.
-          const clamped = pct > lastPct ? pct : lastPct;
-          const delta = clamped - lastPct;
-          if (delta > 0) {
-            progress.report({ increment: delta, message });
-          }
-          lastPct = clamped;
-          this.emit({
-            requestId,
-            phase: 'writing',
-            percent: clamped,
-            message,
-            bytesTotal: hex.size
-          });
-        };
-
-        try {
-          await handler.flash(dap, hex.data, hex.startAddress, onProgress, token);
-          this.emit({ requestId, phase: 'done', percent: 100, bytesWritten: hex.size, bytesTotal: hex.size });
-          const elapsed = Date.now() - started;
-          vscode.window.showInformationMessage(
-            vscode.l10n.t('Flash completed successfully in {0} ms.', elapsed)
+      // Phase 2: optional verify with an independent progress UI so the
+      // user can see the verify percentage, elapsed time, and ETA.
+      if (options.verifyAfterFlash) {
+        const result = await this.runVerifyWithProgress(uri, hex, requestId);
+        if (!result.success) {
+          const err = new FreeOcdError(
+            `Verify failed: ${result.mismatches} byte mismatch(es).`,
+            'VERIFY_FAILED'
           );
-          log.info(`Flash completed in ${elapsed} ms.`);
-
-          if (options.verifyAfterFlash) {
-            await this.verifyInternal(dap, handler, hex, requestId, vsToken);
-          }
-
-          // Reset the target so the freshly-flashed image starts running.
-          // Errors here are non-fatal — the flash itself already succeeded.
-          try {
-            await handler.reset(dap);
-          } catch (resetErr) {
-            log.warn(`Post-flash reset warning: ${(resetErr as Error).message}`);
-          }
-        } catch (err) {
-          this.emit({ requestId, phase: 'error', percent: lastPct, message: (err as Error).message });
-          if (err instanceof CancelledError) {
-            vscode.window.showWarningMessage(vscode.l10n.t('Operation cancelled.'));
-          } else {
-            vscode.window.showErrorMessage(
-              vscode.l10n.t('Flash failed: {0}', (err as Error).message)
-            );
-            log.error(err as Error);
-          }
+          vscode.window.showErrorMessage(
+            vscode.l10n.t('Flash failed: {0}', err.message)
+          );
+          log.error(err);
           throw err;
         }
       }
-    );
+
+      // Phase 3: reset so the freshly-flashed image starts running.
+      // Failure here is non-fatal — the flash itself already succeeded.
+      try {
+        await this.deps.getHandler().reset(this.deps.getDap());
+      } catch (resetErr) {
+        log.warn(`Post-flash reset warning: ${(resetErr as Error).message}`);
+      }
     });
   }
 
-  public async verify(uri: vscode.Uri, options: { requestId?: string } = {}): Promise<{ success: boolean; mismatches: number }> {
+  public async verify(
+    uri: vscode.Uri,
+    options: { requestId?: string } = {}
+  ): Promise<{ success: boolean; mismatches: number }> {
     return this.runExclusive('verify', async () => {
-    const hex = await this.loadHex(uri);
-    const requestId = options.requestId ?? genId();
-    const handler = this.deps.getHandler();
-    const dap = this.deps.getDap();
-
-    return vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: vscode.l10n.t('Verifying {0}...', basename(uri)),
-        cancellable: true
-      },
-      async (progress, vsToken) => {
-        const token = toCancellable(vsToken);
-        let lastPct = 0;
-        const onProgress = (pct: number): void => {
-          const clamped = pct > lastPct ? pct : lastPct;
-          const delta = clamped - lastPct;
-          if (delta > 0) {
-            progress.report({ increment: delta });
-          }
-          lastPct = clamped;
-          this.emit({ requestId, phase: 'verifying', percent: clamped, bytesTotal: hex.size });
-        };
-        try {
-          const result = await handler.verify(dap, hex.data, hex.startAddress, onProgress, token);
-          if (result.success) {
-            vscode.window.showInformationMessage(
-              vscode.l10n.t('Verify passed ({0} bytes match).', hex.size)
-            );
-          } else {
-            vscode.window.showWarningMessage(
-              vscode.l10n.t('Verify failed: {0} byte mismatch(es).', result.mismatches)
-            );
-          }
-          this.emit({ requestId, phase: 'done', percent: 100 });
-          return result;
-        } catch (err) {
-          if (err instanceof CancelledError) {
-            vscode.window.showWarningMessage(vscode.l10n.t('Operation cancelled.'));
-          } else {
-            vscode.window.showErrorMessage(
-              vscode.l10n.t('Verify failed: {0}', (err as Error).message)
-            );
-          }
-          this.emit({ requestId, phase: 'error', percent: lastPct, message: (err as Error).message });
-          throw err;
-        }
+      const hex = await this.loadHex(uri);
+      const requestId = options.requestId ?? genId();
+      const result = await this.runVerifyWithProgress(uri, hex, requestId);
+      if (result.success) {
+        vscode.window.showInformationMessage(
+          vscode.l10n.t('Verify passed ({0} bytes match).', hex.size)
+        );
+      } else {
+        vscode.window.showWarningMessage(
+          vscode.l10n.t('Verify failed: {0} byte mismatch(es).', result.mismatches)
+        );
       }
-    );
+      return result;
     });
   }
 
   public async recover(options: { requestId?: string } = {}): Promise<void> {
     return this.runExclusive('recover', async () => {
-    const requestId = options.requestId ?? genId();
-    const handler = this.deps.getHandler();
-    const dap = this.deps.getDap();
+      const requestId = options.requestId ?? genId();
+      const handler = this.deps.getHandler();
+      const dap = this.deps.getDap();
 
-    await vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: vscode.l10n.t('Recovering target (mass erase)...'),
-        cancellable: true
-      },
-      async (progress, vsToken) => {
-        const token = toCancellable(vsToken);
-        let lastPct = 0;
-        const onProgress = (pct: number, message?: string): void => {
-          const clamped = pct > lastPct ? pct : lastPct;
-          const delta = clamped - lastPct;
-          if (delta > 0) {
-            progress.report({ increment: delta, message });
-          }
-          lastPct = clamped;
-          this.emit({ requestId, phase: 'erasing', percent: clamped, message });
-        };
-        try {
-          await handler.recover(dap, onProgress, token);
-          vscode.window.showInformationMessage(vscode.l10n.t('Recovery completed successfully.'));
-          this.emit({ requestId, phase: 'done', percent: 100 });
-        } catch (err) {
-          if (err instanceof CancelledError) {
-            vscode.window.showWarningMessage(vscode.l10n.t('Operation cancelled.'));
-          } else {
-            vscode.window.showErrorMessage(
-              vscode.l10n.t('Recovery failed: {0}', (err as Error).message)
+      await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: vscode.l10n.t('Recovering target (mass erase)...'),
+          cancellable: true
+        },
+        async (progress, vsToken) => {
+          const token = toCancellable(vsToken);
+          const started = Date.now();
+          let lastPct = 0;
+          const onProgress = (pct: number, message?: string): void => {
+            const clamped = pct > lastPct ? pct : lastPct;
+            const delta = clamped - lastPct;
+            const elapsedMs = Date.now() - started;
+            const { message: displayMessage, etaMs } = buildProgressMessage(
+              elapsedMs,
+              clamped,
+              message
             );
+            if (delta > 0) {
+              progress.report({ increment: delta, message: displayMessage });
+            }
+            lastPct = clamped;
+            this.emit({
+              requestId,
+              phase: 'erasing',
+              percent: clamped,
+              message,
+              elapsedMs,
+              etaMs
+            });
+          };
+          try {
+            await handler.recover(dap, onProgress, token);
+            const elapsedMs = Date.now() - started;
+            vscode.window.showInformationMessage(
+              vscode.l10n.t('Recovery completed successfully.')
+            );
+            log.info(`Recovery completed in ${elapsedMs} ms.`);
+            this.emit({ requestId, phase: 'done', percent: 100, elapsedMs });
+          } catch (err) {
+            const elapsedMs = Date.now() - started;
+            if (err instanceof CancelledError) {
+              vscode.window.showWarningMessage(vscode.l10n.t('Operation cancelled.'));
+            } else {
+              vscode.window.showErrorMessage(
+                vscode.l10n.t('Recovery failed: {0}', (err as Error).message)
+              );
+            }
+            this.emit({
+              requestId,
+              phase: 'error',
+              percent: lastPct,
+              message: (err as Error).message,
+              elapsedMs
+            });
+            throw err;
           }
-          this.emit({ requestId, phase: 'error', percent: lastPct, message: (err as Error).message });
-          throw err;
         }
-      }
-    );
+      );
     });
   }
 
@@ -259,22 +217,184 @@ export class Flasher {
     });
   }
 
-  private async verifyInternal(
-    dap: unknown,
-    handler: PlatformHandler,
+  /**
+   * Internal: run the flash phase inside its own `withProgress`. Notifies
+   * the UI of elapsed / estimated-remaining time on every progress tick.
+   *
+   * Throws on cancellation or flash failure; the caller is responsible for
+   * subsequent phases (verify / reset).
+   */
+  private async runFlashWithProgress(
+    uri: vscode.Uri,
     hex: ParsedHex,
-    requestId: string,
-    vsToken: vscode.CancellationToken
+    requestId: string
   ): Promise<void> {
-    const token = toCancellable(vsToken);
-    const result = await handler.verify(dap, hex.data, hex.startAddress, () => undefined, token);
-    if (!result.success) {
-      throw new FreeOcdError(
-        `Verify failed: ${result.mismatches} byte mismatch(es).`,
-        'VERIFY_FAILED'
-      );
-    }
-    this.emit({ requestId, phase: 'done', percent: 100 });
+    const handler = this.deps.getHandler();
+    const dap = this.deps.getDap();
+
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: vscode.l10n.t('Flashing {0} ({1} bytes)...', basename(uri), hex.size),
+        cancellable: true
+      },
+      async (progress, vsToken) => {
+        const token = toCancellable(vsToken);
+        const started = Date.now();
+
+        this.emit({ requestId, phase: 'preparing', percent: 0, elapsedMs: 0 });
+
+        let lastPct = 0;
+        const onProgress = (pct: number, message?: string): void => {
+          // Clamp to monotonically non-decreasing percentages so a transient
+          // regression in reported progress does not cause us to
+          // over-report the next increment.
+          const clamped = pct > lastPct ? pct : lastPct;
+          const delta = clamped - lastPct;
+          const elapsedMs = Date.now() - started;
+          const { message: displayMessage, etaMs } = buildProgressMessage(
+            elapsedMs,
+            clamped,
+            message
+          );
+          if (delta > 0) {
+            progress.report({ increment: delta, message: displayMessage });
+          }
+          lastPct = clamped;
+          this.emit({
+            requestId,
+            phase: 'writing',
+            percent: clamped,
+            message,
+            bytesTotal: hex.size,
+            elapsedMs,
+            etaMs
+          });
+        };
+
+        try {
+          await handler.flash(dap, hex.data, hex.startAddress, onProgress, token);
+          const elapsedMs = Date.now() - started;
+          this.emit({
+            requestId,
+            phase: 'done',
+            percent: 100,
+            bytesWritten: hex.size,
+            bytesTotal: hex.size,
+            elapsedMs
+          });
+          vscode.window.showInformationMessage(
+            vscode.l10n.t('Flash completed successfully in {0} ms.', elapsedMs)
+          );
+          log.info(`Flash completed in ${elapsedMs} ms.`);
+        } catch (err) {
+          const elapsedMs = Date.now() - started;
+          this.emit({
+            requestId,
+            phase: 'error',
+            percent: lastPct,
+            message: (err as Error).message,
+            elapsedMs
+          });
+          if (err instanceof CancelledError) {
+            vscode.window.showWarningMessage(vscode.l10n.t('Operation cancelled.'));
+          } else {
+            vscode.window.showErrorMessage(
+              vscode.l10n.t('Flash failed: {0}', (err as Error).message)
+            );
+            log.error(err as Error);
+          }
+          throw err;
+        }
+      }
+    );
+  }
+
+  /**
+   * Internal: run the verify phase inside its own `withProgress`. Emits
+   * elapsed / estimated-remaining time on every progress tick.
+   *
+   * Returns `{success, mismatches}`. Throws on cancellation or transport
+   * errors; the caller decides how to surface a byte-mismatch failure
+   * (warning vs. fatal Flash failure).
+   */
+  private async runVerifyWithProgress(
+    uri: vscode.Uri,
+    hex: ParsedHex,
+    requestId: string
+  ): Promise<{ success: boolean; mismatches: number }> {
+    const handler = this.deps.getHandler();
+    const dap = this.deps.getDap();
+
+    return vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: vscode.l10n.t('Verifying {0}...', basename(uri)),
+        cancellable: true
+      },
+      async (progress, vsToken) => {
+        const token = toCancellable(vsToken);
+        const started = Date.now();
+
+        this.emit({ requestId, phase: 'verifying', percent: 0, elapsedMs: 0 });
+
+        let lastPct = 0;
+        const onProgress = (pct: number, message?: string): void => {
+          const clamped = pct > lastPct ? pct : lastPct;
+          const delta = clamped - lastPct;
+          const elapsedMs = Date.now() - started;
+          const { message: displayMessage, etaMs } = buildProgressMessage(
+            elapsedMs,
+            clamped,
+            message
+          );
+          if (delta > 0) {
+            progress.report({ increment: delta, message: displayMessage });
+          }
+          lastPct = clamped;
+          this.emit({
+            requestId,
+            phase: 'verifying',
+            percent: clamped,
+            message,
+            bytesTotal: hex.size,
+            elapsedMs,
+            etaMs
+          });
+        };
+
+        try {
+          const result = await handler.verify(
+            dap,
+            hex.data,
+            hex.startAddress,
+            onProgress,
+            token
+          );
+          const elapsedMs = Date.now() - started;
+          this.emit({ requestId, phase: 'done', percent: 100, elapsedMs });
+          log.info(`Verify completed in ${elapsedMs} ms (${result.mismatches} mismatches).`);
+          return result;
+        } catch (err) {
+          const elapsedMs = Date.now() - started;
+          this.emit({
+            requestId,
+            phase: 'error',
+            percent: lastPct,
+            message: (err as Error).message,
+            elapsedMs
+          });
+          if (err instanceof CancelledError) {
+            vscode.window.showWarningMessage(vscode.l10n.t('Operation cancelled.'));
+          } else {
+            vscode.window.showErrorMessage(
+              vscode.l10n.t('Verify failed: {0}', (err as Error).message)
+            );
+          }
+          throw err;
+        }
+      }
+    );
   }
 
   private emit(p: FlashProgress): void {
@@ -295,4 +415,53 @@ function toCancellable(token: vscode.CancellationToken): Cancellable {
   return {
     isCancelled: () => token.isCancellationRequested
   };
+}
+
+/**
+ * Format a duration (seconds) into a compact human-friendly string.
+ * Mirrors the `freeocd-web` helper so the two UIs stay in sync:
+ *   <60s   -> "Xs"
+ *   <3600s -> "Xm Ys"
+ *   else   -> "Xh Ym"
+ */
+function formatTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    return '?';
+  }
+  if (seconds < 60) {
+    return `${Math.round(seconds)}s`;
+  }
+  if (seconds < 3600) {
+    return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
+  }
+  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+}
+
+/**
+ * Build a VS Code progress message with elapsed / estimated-remaining
+ * time, mirroring the `freeocd-web` step progress UI. Remaining time is
+ * suppressed until at least 1s has elapsed and progress is strictly
+ * between 0% and 100% so we don't display wild ETAs like "~99h
+ * remaining" while the operation is ramping up.
+ *
+ * Example output: `"Flashing: 42% (3s elapsed, ~4s remaining)"`.
+ */
+function buildProgressMessage(
+  elapsedMs: number,
+  percent: number,
+  baseMessage?: string
+): { message: string; etaMs?: number } {
+  const elapsedSec = elapsedMs / 1000;
+  const timeParts: string[] = [`${formatTime(elapsedSec)} elapsed`];
+  let etaMs: number | undefined;
+  if (elapsedSec >= 1 && percent > 0 && percent < 100) {
+    const remainingSec = (elapsedSec / percent) * (100 - percent);
+    if (remainingSec > 0) {
+      timeParts.push(`~${formatTime(remainingSec)} remaining`);
+      etaMs = Math.round(remainingSec * 1000);
+    }
+  }
+  const timingStr = `(${timeParts.join(', ')})`;
+  const message = baseMessage ? `${baseMessage} ${timingStr}` : timingStr;
+  return { message, etaMs };
 }

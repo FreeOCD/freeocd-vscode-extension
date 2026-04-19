@@ -103,6 +103,10 @@ export interface FlashProgress {
   bytesWritten?: number;
   bytesTotal?: number;
   message?: string;
+  /** Milliseconds elapsed since the current phase started. */
+  elapsedMs?: number;
+  /** Estimated milliseconds remaining until the current phase completes. */
+  etaMs?: number;
 }
 
 export interface SessionLogEntry {

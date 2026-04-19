@@ -53,7 +53,8 @@ export const flashTools: ToolDefinition[] = [
   },
   {
     name: 'get_flash_progress',
-    description: 'Return the latest phase/percent/message for the given flash requestId.',
+    description:
+      'Return the latest phase/percent/message/elapsedMs/etaMs for the given flash requestId.',
     toolSet: 'freeocd-flash',
     schema: getFlashProgressSchema
   },
