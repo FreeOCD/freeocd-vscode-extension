@@ -27,6 +27,7 @@ import { rttTools } from './tools/rtt-tools';
 import { dapTools } from './tools/dap-tools';
 import { processorTools } from './tools/processor-tools';
 import { sessionTools } from './tools/session-tools';
+import { aiTools } from './tools/ai-tools';
 import { readAPReg } from '../dap/dap-operations';
 import { FreeOcdError, NotConnectedError, NoTargetError } from '../common/errors';
 import { log } from '../common/logger';
@@ -66,6 +67,17 @@ const ALL_TOOLS: ToolDefinition[] = [
   ...processorTools,
   ...sessionTools
 ];
+
+/**
+ * Tools surfaced through `describe_capabilities`.
+ *
+ * Includes `aiTools` on top of `ALL_TOOLS` so a single call to
+ * `describe_capabilities` gives an agent the full picture of every tool
+ * the MCP server exposes — including the `serverOnly` `ai_*` family that
+ * runs entirely inside the MCP server process and is therefore never
+ * dispatched through `dispatchMcpTool`.
+ */
+const DISCOVERABLE_TOOLS: ToolDefinition[] = [...ALL_TOOLS, ...aiTools];
 
 export async function dispatchMcpTool(
   req: McpRequest,
@@ -298,9 +310,14 @@ function describeCapabilities(ctx: McpToolContext): unknown {
       'freeocd-rtt',
       'freeocd-target',
       'freeocd-low-level',
-      'freeocd-session'
+      'freeocd-session',
+      'freeocd-ai'
     ],
-    tools: ALL_TOOLS.map((t) => ({ name: t.name, toolSet: t.toolSet, description: t.description })),
+    tools: DISCOVERABLE_TOOLS.map((t) => ({
+      name: t.name,
+      toolSet: t.toolSet,
+      description: t.description
+    })),
     connection: ctx.connection.getInfo(),
     currentTarget: ctx.targets.getCurrent() ?? null,
     availableTargets: ctx.targets.list().map((t) => ({ id: t.id, name: t.name, platform: t.platform }))

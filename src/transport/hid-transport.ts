@@ -30,16 +30,23 @@ const DEFAULT_PACKET_SIZE = 64;
 /**
  * CMSIS-DAP v1 HID vendor-specific usage page.
  *
- * This constant is retained for informational purposes but is no longer
- * used for device filtering. Devices are now filtered solely by vendor ID
- * from `probe-filters.json`.
+ * Probes that follow the CMSIS-DAP spec expose a vendor-specific HID usage
+ * page of `0xFF00`. It is used together with the product-string regexes
+ * below as the "looks like a CMSIS-DAP probe" identity check in
+ * `HidBackend.list()`, alongside the vendor-ID whitelist loaded from
+ * `probe-filters.json`.
  */
 export const CMSIS_DAP_USAGE_PAGE = 0xff00;
 
 /**
  * Known CMSIS-DAP probe vendor IDs loaded from `probe-filters.json`.
- * Devices are filtered solely by vendor ID: a device is accepted only when
- * its vendor ID is in this list.
+ *
+ * A vendor-ID match is a **necessary but not sufficient** condition for a
+ * device to appear as a selectable probe — the device must *also* pass the
+ * CMSIS-DAP identity check (`CMSIS_DAP_USAGE_PAGE` or a recognized product
+ * string). This prevents unrelated HID devices from the same vendor
+ * (e.g. a Raspberry Pi Pico running user firmware rather than Picoprobe,
+ * or a Seeed Studio keyboard) from being misidentified as probes.
  */
 let KNOWN_CMSIS_DAP_VENDOR_IDS: number[] = [];
 
@@ -230,10 +237,24 @@ export class HidBackend implements TransportBackend {
     const candidates: ProbeInfo[] = [];
 
     for (const device of devices) {
-      // Vendor ID whitelist loaded from probe-filters.json.
+      // Stage 1: vendor-ID whitelist loaded from probe-filters.json.
+      // Cheaply rejects the vast majority of unrelated HID devices.
       const isKnownProbe = KNOWN_CMSIS_DAP_VENDOR_IDS.includes(device.vendorId);
 
-      if (!isKnownProbe) {
+      // Stage 2: CMSIS-DAP identity check. Without this, any HID interface
+      // from a known probe vendor would be surfaced — e.g. a Raspberry Pi
+      // Pico running user firmware instead of Picoprobe, or a keyboard /
+      // mouse from a vendor that also ships a debug probe. Opening such a
+      // device and issuing DAP commands produces confusing transport
+      // errors.
+      const product = device.product ?? '';
+      const isCmsisDap =
+        device.usagePage === CMSIS_DAP_USAGE_PAGE ||
+        /CMSIS-?DAP/i.test(product) ||
+        /DAPLink/i.test(product) ||
+        /Picoprobe/i.test(product);
+
+      if (!isKnownProbe || !isCmsisDap) {
         continue;
       }
 

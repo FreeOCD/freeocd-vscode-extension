@@ -106,6 +106,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `activationEvents` is intentionally minimal (`onStartupFinished`); VS Code
   implicitly activates on commands / views / taskDefinitions / MCP providers.
 
-[Unreleased]: https://github.com/FreeOCD/freeocd-vscode-extension/compare/v0.0.2...HEAD
+[Unreleased]: https://github.com/FreeOCD/freeocd-vscode-extension/compare/v0.0.3...HEAD
+[0.0.3]: https://github.com/FreeOCD/freeocd-vscode-extension/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/FreeOCD/freeocd-vscode-extension/releases/tag/v0.0.2
 [0.0.1]: https://github.com/FreeOCD/freeocd-vscode-extension/releases/tag/v0.0.1
