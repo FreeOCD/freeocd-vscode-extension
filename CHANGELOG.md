@@ -6,6 +6,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.3] - 2026-04-20
+
+### Changed
+
+- **MCP**: Upgraded the `mcpServerDefinitionProvider` registration to the
+  full VS Code 1.102+ contract. `vscode.McpStdioServerDefinition` is now
+  used as a class, and both `onDidChangeMcpServerDefinitions` and
+  `resolveMcpServerDefinition` are implemented. The `version` field is
+  propagated from `package.json` so VS Code can detect tool-list changes
+  across extension upgrades, and toggling `freeocd.mcp.enabled` now
+  re-queries the provider without a window reload.
+- **MCP**: Tool definitions now ship with MCP 2025-11-25 behavior
+  annotations (`title`, `readOnlyHint`, `destructiveHint`,
+  `idempotentHint`, `openWorldHint`). Clients such as Copilot agent
+  mode use these to decide auto-approval and confirmation dialogs —
+  e.g. `list_targets` can run without prompting while `recover`,
+  `flash_hex`, and `processor_execute` are gated behind explicit
+  user confirmation.
+- **MCP**: `tools/list` now returns real JSON Schema objects derived
+  from the Zod argument schemas (via `zod-to-json-schema`) instead of
+  a permissive fallback. LLMs can see `required` / `properties` /
+  `enum` constraints directly, dramatically improving tool-call
+  argument accuracy.
+
+### Added
+
+- **MCP**: Opportunistic [elicitation](https://modelcontextprotocol.io/specification/2025-11-25/client/elicitation)
+  support for the `ai_diagnose_flash_failure` tool. Clients that declare
+  the `elicitation` capability during the MCP handshake will get a form
+  prompt for optional context (cable swap, new firmware, etc.) before
+  the diagnostic sampling call, improving root-cause analysis quality.
+  Clients that don't support elicitation fall back to the previous
+  behavior silently.
+- **MCP**: `zod-to-json-schema` promoted from a transitive dependency
+  of `@modelcontextprotocol/sdk` to a direct dependency so the
+  schema-conversion contract is versioned explicitly in `package.json`.
+
 ## [0.0.2] - 2026-04-19
 
 ### Changed

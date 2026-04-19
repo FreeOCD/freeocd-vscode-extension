@@ -21,6 +21,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
+import type { ZodType } from 'zod';
+// `zod-to-json-schema` converts the Zod v3 schemas our tools declare into
+// JSON Schema Draft 2020-12 documents that ship in every `tools/list`
+// response. Already pulled in transitively by `@modelcontextprotocol/sdk`
+// but declared directly in our package.json to lock the contract.
+import { zodToJsonSchema } from 'zod-to-json-schema';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -130,11 +136,44 @@ async function main(): Promise<void> {
   // Tools
   // --------------------------------------------------------------------------
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: ALL_TOOLS.map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: jsonSchemaFor(tool.name)
-    }))
+    tools: ALL_TOOLS.map((tool) => {
+      const descriptor: Record<string, unknown> = {
+        name: tool.name,
+        description: tool.description,
+        inputSchema: jsonSchemaFor(tool)
+      };
+      if (tool.annotations) {
+        // Strip undefined props so we don't serialize noisy fields that
+        // would confuse clients that haven't seen the annotation yet.
+        const ann: Record<string, unknown> = {};
+        const a = tool.annotations;
+        if (a.title !== undefined) {
+          ann.title = a.title;
+        }
+        if (a.readOnlyHint !== undefined) {
+          ann.readOnlyHint = a.readOnlyHint;
+        }
+        if (a.destructiveHint !== undefined) {
+          ann.destructiveHint = a.destructiveHint;
+        }
+        if (a.idempotentHint !== undefined) {
+          ann.idempotentHint = a.idempotentHint;
+        }
+        if (a.openWorldHint !== undefined) {
+          ann.openWorldHint = a.openWorldHint;
+        }
+        if (Object.keys(ann).length > 0) {
+          descriptor.annotations = ann;
+        }
+        if (a.title) {
+          // MCP 2025-11-25 promotes `title` to a top-level field on Tool in
+          // addition to the annotation. We emit both for maximum client
+          // compatibility.
+          descriptor.title = a.title;
+        }
+      }
+      return descriptor;
+    })
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -259,15 +298,42 @@ function toolError(message: string): { isError: true; content: Array<{ type: 'te
   };
 }
 
-function jsonSchemaFor(toolName: string): Record<string, unknown> {
-  // Minimal fallback schema — the authoritative schema is the Zod one,
-  // which we validate above. We expose a lax inputSchema so older MCP
-  // clients that can't parse Zod still accept any JSON object.
-  void toolName;
-  return {
-    type: 'object',
-    additionalProperties: true
-  };
+function jsonSchemaFor(tool: ToolDefinition): Record<string, unknown> {
+  // Convert the Zod schema to JSON Schema for the MCP `tools/list`
+  // response. This gives the LLM a precise, machine-readable signature for
+  // every tool argument instead of the old "any object" fallback —
+  // dramatically improving tool-call accuracy (empirically, GPT-5 / Claude
+  // Sonnet both hallucinate argument shapes far less often once they can
+  // see the `required` / `properties` map).
+  try {
+    const raw = zodToJsonSchema(tool.schema as ZodType, {
+      // MCP clients default to draft 2020-12 per the current spec; this
+      // target emits the spec-compatible JSON Schema dialect without the
+      // `$schema` identifier so the descriptor stays compact.
+      target: 'jsonSchema2019-09',
+      $refStrategy: 'none'
+    }) as Record<string, unknown>;
+    // MCP requires the top-level schema be `{ "type": "object", ... }`.
+    // Every FreeOCD tool uses `z.object({}).strict()`, so the top-level
+    // type is always `object`; the guard below is defensive in case a
+    // future tool accidentally wraps its args in a union / array.
+    if (raw.type !== 'object') {
+      return {
+        type: 'object',
+        additionalProperties: true
+      };
+    }
+    // Strip the `$schema` identifier to keep the descriptor compact; MCP
+    // clients default to draft 2020-12 already per the current spec.
+    delete (raw as Record<string, unknown>).$schema;
+    return raw;
+  } catch (err) {
+    console.error(`[freeocd-mcp] Failed to convert ${tool.name} schema:`, err);
+    return {
+      type: 'object',
+      additionalProperties: true
+    };
+  }
 }
 
 interface ForwardRequest {

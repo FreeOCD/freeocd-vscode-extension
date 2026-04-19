@@ -36,32 +36,67 @@ export const rttTools: ToolDefinition[] = [
     toolSet: 'freeocd-rtt',
     schema: rttConnectSchema,
     requiresConnection: true,
-    requiresTarget: true
+    requiresTarget: true,
+    annotations: {
+      title: 'Connect RTT',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
   },
   {
     name: 'rtt_disconnect',
     description: 'Stop RTT polling and release buffers.',
     toolSet: 'freeocd-rtt',
-    schema: rttDisconnectSchema
+    schema: rttDisconnectSchema,
+    annotations: {
+      title: 'Disconnect RTT',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true
+    }
   },
   {
     name: 'rtt_read',
     description: 'Read pending bytes from an RTT up-buffer (target → host).',
     toolSet: 'freeocd-rtt',
     schema: rttReadSchema,
-    requiresConnection: true
+    requiresConnection: true,
+    annotations: {
+      title: 'Read RTT Buffer',
+      readOnlyHint: true,
+      // Reads consume bytes from the circular up-buffer, so two
+      // consecutive calls return different data — NOT idempotent.
+      idempotentHint: false,
+      openWorldHint: true
+    }
   },
   {
     name: 'rtt_write',
     description: 'Write a UTF-8 string to an RTT down-buffer (host → target).',
     toolSet: 'freeocd-rtt',
     schema: rttWriteSchema,
-    requiresConnection: true
+    requiresConnection: true,
+    annotations: {
+      title: 'Write to RTT Buffer',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true
+    }
   },
   {
     name: 'get_rtt_status',
     description: 'Return connected/controlBlockAddress/numBufUp/numBufDown.',
     toolSet: 'freeocd-rtt',
-    schema: getRttStatusSchema
+    schema: getRttStatusSchema,
+    annotations: {
+      title: 'Get RTT Status',
+      readOnlyHint: true,
+      idempotentHint: true,
+      openWorldHint: false
+    }
   }
 ];

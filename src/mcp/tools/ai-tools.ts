@@ -71,7 +71,20 @@ export const aiTools: ToolDefinition[] = [
       'Diagnose the most recent flash / recover / verify failure using MCP sampling. Gathers connection info, session log, last error, and live CMSIS-DAP diagnostics, then asks the host LLM to produce a structured root-cause analysis with recommended actions.',
     toolSet: 'freeocd-ai',
     schema: aiDiagnoseFlashFailureSchema,
-    serverOnly: true
+    serverOnly: true,
+    annotations: {
+      title: 'AI: Diagnose Flash Failure',
+      // `readOnlyHint` as far as hardware / extension state goes —
+      // the tool drives MCP sampling against the client's LLM, but it
+      // does not flash, write, or otherwise change any target state.
+      readOnlyHint: true,
+      // LLM calls are non-deterministic, so two calls return different
+      // analysis text.
+      idempotentHint: false,
+      // `openWorldHint` is true: the LLM is an external system over
+      // which the server has no control.
+      openWorldHint: true
+    }
   },
   {
     name: 'ai_generate_target_from_datasheet',
@@ -79,7 +92,13 @@ export const aiTools: ToolDefinition[] = [
       'Generate a FreeOCD target definition JSON from a datasheet excerpt by delegating to the host LLM via MCP sampling. Iterates validate-and-refine up to maxIterations times until the draft passes `validate_target_definition`.',
     toolSet: 'freeocd-ai',
     schema: aiGenerateTargetFromDatasheetSchema,
-    serverOnly: true
+    serverOnly: true,
+    annotations: {
+      title: 'AI: Generate Target from Datasheet',
+      readOnlyHint: true,
+      idempotentHint: false,
+      openWorldHint: true
+    }
   },
   {
     name: 'ai_summarize_session',
@@ -87,7 +106,13 @@ export const aiTools: ToolDefinition[] = [
       'Summarize the recent FreeOCD session (tool calls, errors, state transitions) using MCP sampling. Useful after a long debug session to capture what was tried and what worked.',
     toolSet: 'freeocd-ai',
     schema: aiSummarizeSessionSchema,
-    serverOnly: true
+    serverOnly: true,
+    annotations: {
+      title: 'AI: Summarize Session',
+      readOnlyHint: true,
+      idempotentHint: false,
+      openWorldHint: true
+    }
   },
   {
     name: 'ai_suggest_target_fix',
@@ -95,6 +120,12 @@ export const aiTools: ToolDefinition[] = [
       'Given a FreeOCD target id and (optionally) an error message, sample the host LLM for concrete JSON patch suggestions that would fix the target definition. Returns both a natural-language explanation and a machine-applicable merge patch.',
     toolSet: 'freeocd-ai',
     schema: aiSuggestTargetFixSchema,
-    serverOnly: true
+    serverOnly: true,
+    annotations: {
+      title: 'AI: Suggest Target Fix',
+      readOnlyHint: true,
+      idempotentHint: false,
+      openWorldHint: true
+    }
   }
 ];

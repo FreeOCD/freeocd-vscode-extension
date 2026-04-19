@@ -2,7 +2,7 @@
   "name": "freeocd-extension",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "engines": {
     "vscode": "^1.102.0"
   },
@@ -478,6 +478,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@vscode/l10n": "^0.0.18",
     "node-hid": "^3.1.2",
-    "zod": "^3.25.0"
+    "zod": "^3.25.0",
+    "zod-to-json-schema": "^3.25.1"
   }
 }

@@ -89,7 +89,7 @@ async function diagnoseFlashFailure(
   args: Record<string, unknown>,
   deps: AiHandlerDeps
 ): Promise<unknown> {
-  const userContext = typeof args.userContext === 'string' ? args.userContext : undefined;
+  let userContext = typeof args.userContext === 'string' ? args.userContext : undefined;
 
   // Parallel context fetch; individual failures are swallowed to `null` so
   // the LLM still sees as much partial state as possible.
@@ -99,6 +99,15 @@ async function diagnoseFlashFailure(
     safeForward(deps.forward, 'get_session_log', { limit: 20 }),
     safeForward(deps.forward, 'describe_capabilities', {})
   ]);
+
+  // Opportunistic elicitation: if the caller didn't give us free-form
+  // context AND the client declared support for elicitation during the
+  // MCP handshake, nudge the user for any extra hints (cable swapped,
+  // new firmware, etc.) before we spend tokens on sampling. Quietly skip
+  // on clients that don't support elicitation, or if the user declines.
+  if (!userContext && clientSupportsElicitation(deps.server)) {
+    userContext = await tryElicitUserContext(deps.server);
+  }
 
   const contextJson = stringifyContext({
     connection,
@@ -506,4 +515,73 @@ function stringifyContext(value: unknown): string {
     return `${json.slice(0, MAX_LEN)}\n… [truncated ${json.length - MAX_LEN} chars]`;
   }
   return json;
+}
+
+// ===========================================================================
+// MCP Elicitation (2025-11-25)
+// ===========================================================================
+
+/**
+ * Check whether the connected client supports elicitation. Servers MUST NOT
+ * send elicitation requests to a client that did not declare the capability
+ * during initialization, so we gate every `elicitInput` call on this helper.
+ *
+ * Returns `false` for older clients (VSCode < 1.103, Windsurf pre-`2026.01`,
+ * older Cursor / Cline builds). Callers should treat the absence of
+ * elicitation as an optional feature and fall back to their default path.
+ */
+function clientSupportsElicitation(server: Server): boolean {
+  try {
+    const caps = server.getClientCapabilities();
+    return Boolean(caps?.elicitation);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Elicit an optional free-form hint from the user before spending tokens on
+ * the diagnostic sampling call. The schema is intentionally minimal so the
+ * prompt stays lightweight; clients that don't implement form-mode
+ * elicitation (only URL mode) will decline here, which we treat the same
+ * as "user has nothing to add" and continue silently.
+ */
+async function tryElicitUserContext(server: Server): Promise<string | undefined> {
+  try {
+    const result = await server.elicitInput({
+      // Form mode is the only one we need; URL mode is reserved for
+      // sensitive interactions (OAuth flows, payment credentials). The
+      // `elicitationId` field belongs exclusively to URL mode, per SDK
+      // type definitions, and must be omitted here.
+      mode: 'form',
+      message:
+        'Optional: anything unusual about this failure? (e.g. swapped cables, new firmware, first boot after reflash)',
+      requestedSchema: {
+        type: 'object',
+        properties: {
+          note: {
+            type: 'string',
+            title: 'Additional context',
+            description:
+              'Free-form notes to help the AI narrow down the root cause. Leave blank to skip.',
+            maxLength: 2000
+          }
+        },
+        required: []
+      }
+    });
+    if (result.action !== 'accept' || !result.content) {
+      return undefined;
+    }
+    const note = (result.content as { note?: unknown }).note;
+    if (typeof note !== 'string' || note.trim().length === 0) {
+      return undefined;
+    }
+    return note.trim();
+  } catch {
+    // The client can reject or error on elicitation for any number of
+    // reasons (user cancelled, schema validation failed, capability
+    // negotiation drifted). None of those should abort the diagnostic.
+    return undefined;
+  }
 }

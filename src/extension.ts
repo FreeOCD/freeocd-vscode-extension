@@ -376,10 +376,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const mcpEnabled = vscode.workspace.getConfiguration('freeocd').get<boolean>('mcp.enabled', true);
   bridge.setEnabled(mcpEnabled);
 
+  // EventEmitter bridged into `McpServerDefinitionProvider.onDidChangeMcpServerDefinitions`
+  // so a user toggling `freeocd.mcp.enabled` forces VSCode to re-query
+  // the provider instead of requiring a window reload.
+  const mcpProviderChangeEmitter = new vscode.EventEmitter<void>();
+  context.subscriptions.push(mcpProviderChangeEmitter);
+
   const mcpProvider = registerMcpProvider({
     serverJs: vscode.Uri.joinPath(context.extensionUri, 'out', 'mcp-server.js').fsPath,
     extensionDir: context.extensionUri.fsPath,
-    ipcDir: ipcDir.fsPath
+    ipcDir: ipcDir.fsPath,
+    version: context.extension.packageJSON.version as string | undefined,
+    onDidChange: mcpProviderChangeEmitter.event
   });
   if (mcpProvider) {
     context.subscriptions.push(mcpProvider);
@@ -754,6 +762,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         bridge.setEnabled(
           vscode.workspace.getConfiguration('freeocd').get<boolean>('mcp.enabled', true)
         );
+        // Also nudge VSCode's MCP layer so it re-queries the provider and
+        // picks up the new enabled state without a window reload.
+        mcpProviderChangeEmitter.fire();
       }
       if (e.affectsConfiguration('freeocd.mcp.sessionLogSize')) {
         sessionLog.setCapacity(

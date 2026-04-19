@@ -60,30 +60,40 @@ export const dapWriteBytesSchema = z
   .object({ address: u32, dataBase64: z.string() })
   .strict();
 
+/** Read-only hardware inspection: `openWorldHint:true` because we still touch the probe. */
+const readOnlyHw = { readOnlyHint: true, idempotentHint: false, openWorldHint: true } as const;
+/** Writes a register / memory location on the target. Not destructive by itself. */
+const writeHw = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: true
+} as const;
+
 export const dapTools: ToolDefinition[] = [
   // --- Proxy ---
-  { name: 'dap_info', description: 'Query CMSIS-DAP DAP_INFO (capabilities, firmware version, etc.).', toolSet: 'freeocd-low-level', schema: dapInfoSchema, requiresConnection: true },
-  { name: 'dap_swj_clock', description: 'Set SWJ clock frequency in Hz.', toolSet: 'freeocd-low-level', schema: dapSwjClockSchema, requiresConnection: true },
-  { name: 'dap_swj_sequence', description: 'Issue a raw SWJ sequence (hex-encoded bits).', toolSet: 'freeocd-low-level', schema: dapSwjSequenceSchema, requiresConnection: true },
-  { name: 'dap_transfer_configure', description: 'Configure idle cycles, wait retries, and match retries.', toolSet: 'freeocd-low-level', schema: dapTransferConfigureSchema, requiresConnection: true },
-  { name: 'dap_connect', description: 'Reconnect the proxy (SWD mode).', toolSet: 'freeocd-low-level', schema: dapConnectSchema, requiresConnection: true },
-  { name: 'dap_disconnect', description: 'Disconnect the proxy.', toolSet: 'freeocd-low-level', schema: dapDisconnectSchema, requiresConnection: true },
-  { name: 'dap_reconnect', description: 'Disconnect + reconnect (clears DP cache).', toolSet: 'freeocd-low-level', schema: dapReconnectSchema, requiresConnection: true },
-  { name: 'dap_reset', description: 'Issue DAP_RESET_TARGET.', toolSet: 'freeocd-low-level', schema: dapResetSchema, requiresConnection: true },
+  { name: 'dap_info', description: 'Query CMSIS-DAP DAP_INFO (capabilities, firmware version, etc.).', toolSet: 'freeocd-low-level', schema: dapInfoSchema, requiresConnection: true, annotations: { title: 'DAP: Get Info', ...readOnlyHw, idempotentHint: true } },
+  { name: 'dap_swj_clock', description: 'Set SWJ clock frequency in Hz.', toolSet: 'freeocd-low-level', schema: dapSwjClockSchema, requiresConnection: true, annotations: { title: 'DAP: Set SWJ Clock', ...writeHw } },
+  { name: 'dap_swj_sequence', description: 'Issue a raw SWJ sequence (hex-encoded bits).', toolSet: 'freeocd-low-level', schema: dapSwjSequenceSchema, requiresConnection: true, annotations: { title: 'DAP: SWJ Sequence', ...writeHw, idempotentHint: false } },
+  { name: 'dap_transfer_configure', description: 'Configure idle cycles, wait retries, and match retries.', toolSet: 'freeocd-low-level', schema: dapTransferConfigureSchema, requiresConnection: true, annotations: { title: 'DAP: Configure Transfer', ...writeHw } },
+  { name: 'dap_connect', description: 'Reconnect the proxy (SWD mode).', toolSet: 'freeocd-low-level', schema: dapConnectSchema, requiresConnection: true, annotations: { title: 'DAP: Connect', ...writeHw } },
+  { name: 'dap_disconnect', description: 'Disconnect the proxy.', toolSet: 'freeocd-low-level', schema: dapDisconnectSchema, requiresConnection: true, annotations: { title: 'DAP: Disconnect', ...writeHw } },
+  { name: 'dap_reconnect', description: 'Disconnect + reconnect (clears DP cache).', toolSet: 'freeocd-low-level', schema: dapReconnectSchema, requiresConnection: true, annotations: { title: 'DAP: Reconnect', ...writeHw } },
+  { name: 'dap_reset', description: 'Issue DAP_RESET_TARGET.', toolSet: 'freeocd-low-level', schema: dapResetSchema, requiresConnection: true, annotations: { title: 'DAP: Reset Target', ...writeHw, idempotentHint: false } },
 
   // --- DAP/ADI ---
-  { name: 'dap_read_dp', description: 'Read a DP register.', toolSet: 'freeocd-low-level', schema: dapReadRegSchema, requiresConnection: true },
-  { name: 'dap_write_dp', description: 'Write a DP register.', toolSet: 'freeocd-low-level', schema: dapWriteRegSchema, requiresConnection: true },
-  { name: 'dap_read_ap', description: 'Read an AP register via the proxy.', toolSet: 'freeocd-low-level', schema: dapReadApSchema, requiresConnection: true },
-  { name: 'dap_write_ap', description: 'Write an AP register via the proxy.', toolSet: 'freeocd-low-level', schema: dapWriteApSchema, requiresConnection: true },
-  { name: 'dap_read_mem8', description: 'Read one byte at address.', toolSet: 'freeocd-low-level', schema: dapReadMemSchema, requiresConnection: true },
-  { name: 'dap_read_mem16', description: 'Read one half-word at address.', toolSet: 'freeocd-low-level', schema: dapReadMemSchema, requiresConnection: true },
-  { name: 'dap_read_mem32', description: 'Read one word at address.', toolSet: 'freeocd-low-level', schema: dapReadMemSchema, requiresConnection: true },
-  { name: 'dap_write_mem8', description: 'Write one byte at address.', toolSet: 'freeocd-low-level', schema: dapWriteMemSchema, requiresConnection: true },
-  { name: 'dap_write_mem16', description: 'Write one half-word at address.', toolSet: 'freeocd-low-level', schema: dapWriteMemSchema, requiresConnection: true },
-  { name: 'dap_write_mem32', description: 'Write one word at address.', toolSet: 'freeocd-low-level', schema: dapWriteMemSchema, requiresConnection: true },
-  { name: 'dap_read_block', description: 'Read a block of 32-bit words (<= 4096).', toolSet: 'freeocd-low-level', schema: dapReadBlockSchema, requiresConnection: true },
-  { name: 'dap_write_block', description: 'Write a block of 32-bit words (<= 4096).', toolSet: 'freeocd-low-level', schema: dapWriteBlockSchema, requiresConnection: true },
-  { name: 'dap_read_bytes', description: 'Read raw bytes (returns base64).', toolSet: 'freeocd-low-level', schema: dapReadBytesSchema, requiresConnection: true },
-  { name: 'dap_write_bytes', description: 'Write raw bytes (expects base64 payload).', toolSet: 'freeocd-low-level', schema: dapWriteBytesSchema, requiresConnection: true }
+  { name: 'dap_read_dp', description: 'Read a DP register.', toolSet: 'freeocd-low-level', schema: dapReadRegSchema, requiresConnection: true, annotations: { title: 'DAP: Read DP Register', ...readOnlyHw } },
+  { name: 'dap_write_dp', description: 'Write a DP register.', toolSet: 'freeocd-low-level', schema: dapWriteRegSchema, requiresConnection: true, annotations: { title: 'DAP: Write DP Register', ...writeHw } },
+  { name: 'dap_read_ap', description: 'Read an AP register via the proxy.', toolSet: 'freeocd-low-level', schema: dapReadApSchema, requiresConnection: true, annotations: { title: 'DAP: Read AP Register', ...readOnlyHw } },
+  { name: 'dap_write_ap', description: 'Write an AP register via the proxy.', toolSet: 'freeocd-low-level', schema: dapWriteApSchema, requiresConnection: true, annotations: { title: 'DAP: Write AP Register', ...writeHw } },
+  { name: 'dap_read_mem8', description: 'Read one byte at address.', toolSet: 'freeocd-low-level', schema: dapReadMemSchema, requiresConnection: true, annotations: { title: 'DAP: Read Byte', ...readOnlyHw, idempotentHint: true } },
+  { name: 'dap_read_mem16', description: 'Read one half-word at address.', toolSet: 'freeocd-low-level', schema: dapReadMemSchema, requiresConnection: true, annotations: { title: 'DAP: Read Half-Word', ...readOnlyHw, idempotentHint: true } },
+  { name: 'dap_read_mem32', description: 'Read one word at address.', toolSet: 'freeocd-low-level', schema: dapReadMemSchema, requiresConnection: true, annotations: { title: 'DAP: Read Word', ...readOnlyHw, idempotentHint: true } },
+  { name: 'dap_write_mem8', description: 'Write one byte at address.', toolSet: 'freeocd-low-level', schema: dapWriteMemSchema, requiresConnection: true, annotations: { title: 'DAP: Write Byte', ...writeHw } },
+  { name: 'dap_write_mem16', description: 'Write one half-word at address.', toolSet: 'freeocd-low-level', schema: dapWriteMemSchema, requiresConnection: true, annotations: { title: 'DAP: Write Half-Word', ...writeHw } },
+  { name: 'dap_write_mem32', description: 'Write one word at address.', toolSet: 'freeocd-low-level', schema: dapWriteMemSchema, requiresConnection: true, annotations: { title: 'DAP: Write Word', ...writeHw } },
+  { name: 'dap_read_block', description: 'Read a block of 32-bit words (<= 4096).', toolSet: 'freeocd-low-level', schema: dapReadBlockSchema, requiresConnection: true, annotations: { title: 'DAP: Read Block', ...readOnlyHw, idempotentHint: true } },
+  { name: 'dap_write_block', description: 'Write a block of 32-bit words (<= 4096).', toolSet: 'freeocd-low-level', schema: dapWriteBlockSchema, requiresConnection: true, annotations: { title: 'DAP: Write Block', ...writeHw } },
+  { name: 'dap_read_bytes', description: 'Read raw bytes (returns base64).', toolSet: 'freeocd-low-level', schema: dapReadBytesSchema, requiresConnection: true, annotations: { title: 'DAP: Read Bytes', ...readOnlyHw, idempotentHint: true } },
+  { name: 'dap_write_bytes', description: 'Write raw bytes (expects base64 payload).', toolSet: 'freeocd-low-level', schema: dapWriteBytesSchema, requiresConnection: true, annotations: { title: 'DAP: Write Bytes', ...writeHw } }
 ];
