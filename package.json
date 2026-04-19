@@ -2,7 +2,7 @@
   "name": "freeocd-extension",
   "displayName": "%displayName%",
   "description": "%description%",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "engines": {
     "vscode": "^1.101.0"
   },
@@ -75,7 +75,8 @@
       {
         "command": "freeocd.selectHexFile",
         "title": "%command.selectHexFile%",
-        "category": "FreeOCD"
+        "category": "FreeOCD",
+        "icon": "$(file-code)"
       },
       {
         "command": "freeocd.flash",
@@ -409,17 +410,17 @@
           "group": "navigation@1"
         },
         {
-          "command": "freeocd.flash",
+          "command": "freeocd.selectHexFile",
           "when": "view == freeocd-flasher",
           "group": "navigation@1"
         },
         {
-          "command": "freeocd.recover",
+          "command": "freeocd.flash",
           "when": "view == freeocd-flasher",
           "group": "navigation@2"
         },
         {
-          "command": "freeocd.selectTargetMcu",
+          "command": "freeocd.recover",
           "when": "view == freeocd-flasher",
           "group": "navigation@3"
         },

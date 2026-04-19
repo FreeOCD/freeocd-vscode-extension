@@ -182,7 +182,8 @@ class FlasherItem extends vscode.TreeItem {
     public readonly kind: FlasherItemKind,
     label: string,
     state: vscode.TreeItemCheckboxState | undefined,
-    description?: string
+    description?: string,
+    command?: vscode.Command
   ) {
     super(label, vscode.TreeItemCollapsibleState.None);
     if (state !== undefined) {
@@ -190,6 +191,9 @@ class FlasherItem extends vscode.TreeItem {
     }
     if (description) {
       this.description = description;
+    }
+    if (command) {
+      this.command = command;
     }
     this.contextValue = kind;
   }
@@ -216,7 +220,8 @@ export class FlasherTreeProvider implements vscode.TreeDataProvider<FlasherItem>
         'hex',
         vscode.l10n.t('HEX File'),
         undefined,
-        hex ? vscode.workspace.asRelativePath(hex) : vscode.l10n.t('Not selected')
+        hex ? vscode.workspace.asRelativePath(hex) : vscode.l10n.t('Not selected'),
+        { command: 'freeocd.selectHexFile', title: vscode.l10n.t('Select a .hex file') }
       ),
       new FlasherItem(
         'verify',
