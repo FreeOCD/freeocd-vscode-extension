@@ -22,30 +22,63 @@ export const sessionTools: ToolDefinition[] = [
     description:
       'One-shot overview for AI: exposed tools, tool sets, current connection/target/hex state, DAPjs version, supported targets. Use this first.',
     toolSet: 'freeocd-session',
-    schema: describeCapabilitiesSchema
+    schema: describeCapabilitiesSchema,
+    annotations: {
+      title: 'Describe FreeOCD Capabilities',
+      readOnlyHint: true,
+      // Current state (connection, target) may change between calls, so
+      // not strictly idempotent — but it is safe.
+      idempotentHint: false,
+      openWorldHint: false
+    }
   },
   {
     name: 'get_session_log',
     description: 'Return the most recent command log entries across UI, MCP, tasks, and watchers.',
     toolSet: 'freeocd-session',
-    schema: getSessionLogSchema
+    schema: getSessionLogSchema,
+    annotations: {
+      title: 'Get Session Log',
+      readOnlyHint: true,
+      idempotentHint: false,
+      openWorldHint: false
+    }
   },
   {
     name: 'get_command_history',
     description: 'Return command history with args and result summaries.',
     toolSet: 'freeocd-session',
-    schema: getCommandHistorySchema
+    schema: getCommandHistorySchema,
+    annotations: {
+      title: 'Get Command History',
+      readOnlyHint: true,
+      idempotentHint: false,
+      openWorldHint: false
+    }
   },
   {
     name: 'get_last_error',
     description: 'Return the most recent failed command (message, stack, code).',
     toolSet: 'freeocd-session',
-    schema: getLastErrorSchema
+    schema: getLastErrorSchema,
+    annotations: {
+      title: 'Get Last Error',
+      readOnlyHint: true,
+      idempotentHint: false,
+      openWorldHint: false
+    }
   },
   {
     name: 'clear_session_log',
     description: 'Clear the in-memory session log.',
     toolSet: 'freeocd-session',
-    schema: clearSessionLogSchema
+    schema: clearSessionLogSchema,
+    annotations: {
+      title: 'Clear Session Log',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false
+    }
   }
 ];

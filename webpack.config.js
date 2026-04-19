@@ -15,8 +15,9 @@ const packageJson = require('./package.json');
  *   2. `mcp-server.js` — Standalone MCP server (CommonJS, no externals).
  *      Launched as a child process by the IDE's MCP client via stdio.
  *
- * Static assets (DAPjs UMD bundle, icons, target definitions, walkthrough
- * markdown) are copied to the output directory via CopyWebpackPlugin.
+ * Static assets (DAPjs UMD bundle, icons, target definitions from the
+ * `freeocd-web` submodule, walkthrough markdown, tool-sets) are copied to the
+ * output directory via CopyWebpackPlugin.
  */
 
 /** @type {import('webpack').Configuration} */
@@ -54,10 +55,15 @@ const extensionConfig = {
       patterns: [
         { from: 'vendor/dapjs/dist/dap.umd.js', to: 'dap.umd.js', noErrorOnMissing: true },
         { from: 'resources/icons', to: 'icons' },
-        { from: 'resources/targets', to: 'targets' },
         { from: 'resources/walkthrough', to: 'walkthrough' },
         { from: 'resources/tool-sets', to: 'tool-sets' },
-        { from: 'resources/probe-filters.json', to: 'probe-filters.json' }
+        // Target MCU JSON definitions and the central CMSIS-DAP probe filter
+        // list are managed in the `freeocd-web` sister project and vendored in
+        // as a git submodule. The whole `public/targets/` tree (including
+        // `index.json`, `probe-filters.json`, and `<platform>/<family>/<mcu>.json`
+        // files plus any `REFERENCES.md` next to them) is copied verbatim so
+        // both front-ends stay in sync.
+        { from: 'vendor/freeocd-web/public/targets', to: 'targets' }
       ]
     })
   ],

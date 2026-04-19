@@ -31,12 +31,77 @@ export const processorExecuteSchema = z
   .strict();
 
 export const processorTools: ToolDefinition[] = [
-  { name: 'processor_get_state', description: 'Get CPU state (halted / running / locked).', toolSet: 'freeocd-low-level', schema: processorGetStateSchema, requiresConnection: true },
-  { name: 'processor_is_halted', description: 'Return true if the CPU is currently halted.', toolSet: 'freeocd-low-level', schema: processorIsHaltedSchema, requiresConnection: true },
-  { name: 'processor_halt', description: 'Halt the CPU via DHCSR.', toolSet: 'freeocd-low-level', schema: processorHaltSchema, requiresConnection: true },
-  { name: 'processor_resume', description: 'Resume the CPU via DHCSR.', toolSet: 'freeocd-low-level', schema: processorResumeSchema, requiresConnection: true },
-  { name: 'processor_read_core_register', description: 'Read a single core register (R0-R15, xPSR, CONTROL).', toolSet: 'freeocd-low-level', schema: processorReadRegSchema, requiresConnection: true },
-  { name: 'processor_read_core_registers', description: 'Read all standard core registers.', toolSet: 'freeocd-low-level', schema: processorReadRegsSchema, requiresConnection: true },
-  { name: 'processor_write_core_register', description: 'Write a core register.', toolSet: 'freeocd-low-level', schema: processorWriteRegSchema, requiresConnection: true },
-  { name: 'processor_execute', description: 'Upload a code blob to SRAM, set PC/R7, and run.', toolSet: 'freeocd-low-level', schema: processorExecuteSchema, requiresConnection: true }
+  {
+    name: 'processor_get_state',
+    description: 'Get CPU state (halted / running / locked).',
+    toolSet: 'freeocd-low-level',
+    schema: processorGetStateSchema,
+    requiresConnection: true,
+    annotations: { title: 'Processor: Get State', readOnlyHint: true, idempotentHint: false, openWorldHint: true }
+  },
+  {
+    name: 'processor_is_halted',
+    description: 'Return true if the CPU is currently halted.',
+    toolSet: 'freeocd-low-level',
+    schema: processorIsHaltedSchema,
+    requiresConnection: true,
+    annotations: { title: 'Processor: Is Halted', readOnlyHint: true, idempotentHint: false, openWorldHint: true }
+  },
+  {
+    name: 'processor_halt',
+    description: 'Halt the CPU via DHCSR.',
+    toolSet: 'freeocd-low-level',
+    schema: processorHaltSchema,
+    requiresConnection: true,
+    annotations: { title: 'Processor: Halt', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true }
+  },
+  {
+    name: 'processor_resume',
+    description: 'Resume the CPU via DHCSR.',
+    toolSet: 'freeocd-low-level',
+    schema: processorResumeSchema,
+    requiresConnection: true,
+    annotations: { title: 'Processor: Resume', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true }
+  },
+  {
+    name: 'processor_read_core_register',
+    description: 'Read a single core register (R0-R15, xPSR, CONTROL).',
+    toolSet: 'freeocd-low-level',
+    schema: processorReadRegSchema,
+    requiresConnection: true,
+    annotations: { title: 'Processor: Read Core Register', readOnlyHint: true, idempotentHint: true, openWorldHint: true }
+  },
+  {
+    name: 'processor_read_core_registers',
+    description: 'Read all standard core registers.',
+    toolSet: 'freeocd-low-level',
+    schema: processorReadRegsSchema,
+    requiresConnection: true,
+    annotations: { title: 'Processor: Read Core Registers', readOnlyHint: true, idempotentHint: true, openWorldHint: true }
+  },
+  {
+    name: 'processor_write_core_register',
+    description: 'Write a core register.',
+    toolSet: 'freeocd-low-level',
+    schema: processorWriteRegSchema,
+    requiresConnection: true,
+    annotations: { title: 'Processor: Write Core Register', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true }
+  },
+  {
+    name: 'processor_execute',
+    description: 'Upload a code blob to SRAM, set PC/R7, and run.',
+    toolSet: 'freeocd-low-level',
+    schema: processorExecuteSchema,
+    requiresConnection: true,
+    annotations: {
+      title: 'Processor: Execute Code',
+      readOnlyHint: false,
+      // Arbitrary code execution is the most dangerous tool in the
+      // low-level set — it can corrupt flash / RAM / peripherals.
+      // Clients MUST request explicit user confirmation.
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true
+    }
+  }
 ];

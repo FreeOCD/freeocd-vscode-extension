@@ -28,20 +28,25 @@ import { log } from '../common/logger';
 const DEFAULT_PACKET_SIZE = 64;
 
 /**
- * CMSIS-DAP v1 HID vendor/product ID filter list.
+ * CMSIS-DAP v1 HID vendor-specific usage page.
  *
- * Includes the canonical CMSIS-DAP interface class (0x03 = HID) and a set of
- * well-known DAPLink / picoprobe / XIAO / NUCLEO / STLink vendor IDs seen in
- * the wild. The filter is intentionally broad: any HID device with a usage
- * page of 0xFF00 (vendor-specific) and a product string containing "CMSIS-DAP"
- * is considered a candidate.
+ * Probes that follow the CMSIS-DAP spec expose a vendor-specific HID usage
+ * page of `0xFF00`. It is used together with the product-string regexes
+ * below as the "looks like a CMSIS-DAP probe" identity check in
+ * `HidBackend.list()`, alongside the vendor-ID whitelist loaded from
+ * `probe-filters.json`.
  */
 export const CMSIS_DAP_USAGE_PAGE = 0xff00;
 
 /**
- * Known CMSIS-DAP probe vendor IDs loaded from resources/probe-filters.json.
- * These vendor IDs are used to filter probes in addition to usagePage and
- * product name matching.
+ * Known CMSIS-DAP probe vendor IDs loaded from `probe-filters.json`.
+ *
+ * A vendor-ID match is a **necessary but not sufficient** condition for a
+ * device to appear as a selectable probe — the device must *also* pass the
+ * CMSIS-DAP identity check (`CMSIS_DAP_USAGE_PAGE` or a recognized product
+ * string). This prevents unrelated HID devices from the same vendor
+ * (e.g. a Raspberry Pi Pico running user firmware rather than Picoprobe,
+ * or a Seeed Studio keyboard) from being misidentified as probes.
  */
 let KNOWN_CMSIS_DAP_VENDOR_IDS: number[] = [];
 
@@ -49,15 +54,18 @@ let KNOWN_CMSIS_DAP_VENDOR_IDS: number[] = [];
  * Initialize vendor ID filter from JSON file.
  * This must be called after the extension context is available.
  *
- * `probe-filters.json` is copied by webpack's `CopyWebpackPlugin` into
- * `out/probe-filters.json` for packaged VSIXs. When running from source
- * (extension development host) the file also lives at
- * `resources/probe-filters.json`, so we try both locations.
+ * The canonical `probe-filters.json` is maintained in the `freeocd-web`
+ * sister project and vendored in as a git submodule at
+ * `vendor/freeocd-web/public/targets/probe-filters.json`. Webpack's
+ * `CopyWebpackPlugin` copies the whole `public/targets/` tree into
+ * `out/targets/` for packaged VSIXs. When running from source (extension
+ * development host) the file is loaded directly from the submodule path as a
+ * fallback.
  */
 export function initProbeFilters(extensionPath: string): void {
   const candidates = [
-    join(extensionPath, 'out', 'probe-filters.json'),
-    join(extensionPath, 'resources', 'probe-filters.json')
+    join(extensionPath, 'out', 'targets', 'probe-filters.json'),
+    join(extensionPath, 'vendor', 'freeocd-web', 'public', 'targets', 'probe-filters.json')
   ];
 
   for (const filtersPath of candidates) {
@@ -68,7 +76,7 @@ export function initProbeFilters(extensionPath: string): void {
 
   log.warn(
     'Failed to load probe-filters.json from any known location ' +
-      `(${candidates.join(', ')}). Vendor ID filtering will be disabled.`
+      `(${candidates.join(', ')}). No devices will be detected.`
   );
 }
 
@@ -90,7 +98,39 @@ function tryLoadProbeFilters(filtersPath: string): boolean {
   if (!Array.isArray(vendorIds)) {
     return false;
   }
-  KNOWN_CMSIS_DAP_VENDOR_IDS = vendorIds.map((vid) => parseInt(String(vid), 16));
+  // Each entry must be an object of the form
+  // `{ "vid": "0x2E8A", "$comment": "Raspberry Pi — ..." }`.
+  //
+  // The legacy bare-hex-string form (`"0x2E8A"`) is no longer accepted —
+  // the canonical `probe-filters.json` ships in `freeocd-web` and has been
+  // migrated to the object form to carry a `$comment` describing each VID.
+  // Mirror this in `freeocd-web`'s `core/probe-filters.js` when bumping the
+  // submodule pin.
+  const parsed: number[] = [];
+  for (const entry of vendorIds) {
+    if (!entry || typeof entry !== 'object') {
+      log.warn(
+        'Skipping invalid vendor entry in probe-filters.json ' +
+          `(expected { vid: "0x..." }): ${JSON.stringify(entry)}`
+      );
+      continue;
+    }
+    const vidStr = (entry as { vid?: unknown }).vid;
+    if (typeof vidStr !== 'string') {
+      log.warn(
+        'Skipping invalid vendor entry in probe-filters.json ' +
+          `(missing string \`vid\`): ${JSON.stringify(entry)}`
+      );
+      continue;
+    }
+    const vid = parseInt(vidStr, 16);
+    if (Number.isNaN(vid)) {
+      log.warn(`Skipping invalid vendor ID in probe-filters.json: ${vidStr}`);
+      continue;
+    }
+    parsed.push(vid);
+  }
+  KNOWN_CMSIS_DAP_VENDOR_IDS = parsed;
   log.info(
     `Loaded ${KNOWN_CMSIS_DAP_VENDOR_IDS.length} CMSIS-DAP vendor IDs from ${filtersPath}: ` +
       KNOWN_CMSIS_DAP_VENDOR_IDS.map((vid) => '0x' + vid.toString(16)).join(', ')
@@ -197,6 +237,16 @@ export class HidBackend implements TransportBackend {
     const candidates: ProbeInfo[] = [];
 
     for (const device of devices) {
+      // Stage 1: vendor-ID whitelist loaded from probe-filters.json.
+      // Cheaply rejects the vast majority of unrelated HID devices.
+      const isKnownProbe = KNOWN_CMSIS_DAP_VENDOR_IDS.includes(device.vendorId);
+
+      // Stage 2: CMSIS-DAP identity check. Without this, any HID interface
+      // from a known probe vendor would be surfaced — e.g. a Raspberry Pi
+      // Pico running user firmware instead of Picoprobe, or a keyboard /
+      // mouse from a vendor that also ships a debug probe. Opening such a
+      // device and issuing DAP commands produces confusing transport
+      // errors.
       const product = device.product ?? '';
       const isCmsisDap =
         device.usagePage === CMSIS_DAP_USAGE_PAGE ||
@@ -204,13 +254,7 @@ export class HidBackend implements TransportBackend {
         /DAPLink/i.test(product) ||
         /Picoprobe/i.test(product);
 
-      // Vendor ID filtering: if we have a list of known vendor IDs, only include devices from those vendors
-      // If the list is empty (e.g., JSON failed to load), skip this check to maintain backward compatibility
-      const isKnownProbe =
-        KNOWN_CMSIS_DAP_VENDOR_IDS.length === 0 ||
-        KNOWN_CMSIS_DAP_VENDOR_IDS.includes(device.vendorId);
-
-      if (!isCmsisDap || !isKnownProbe) {
+      if (!isKnownProbe || !isCmsisDap) {
         continue;
       }
 

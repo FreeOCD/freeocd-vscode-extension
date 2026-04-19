@@ -1,3 +1,6 @@
 [submodule "vendor/dapjs"]
 	path = vendor/dapjs
 	url = https://github.com/ARMmbed/dapjs
+[submodule "vendor/freeocd-web"]
+	path = vendor/freeocd-web
+	url = https://github.com/FreeOCD/freeocd-web

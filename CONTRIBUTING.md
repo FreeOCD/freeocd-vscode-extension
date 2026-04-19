@@ -41,7 +41,7 @@ Useful scripts:
 | Command                   | What it does                                           |
 |---------------------------|--------------------------------------------------------|
 | `npm run lint`            | ESLint over `src/`                                     |
-| `npm run lint:targets`    | Validate every `resources/targets/**/*.json`           |
+| `npm run lint:targets`    | Validate every target JSON under `vendor/freeocd-web/public/targets/**` |
 | `npx tsc --noEmit -p .`   | Full TypeScript typecheck                              |
 | `npm run compile`         | Production webpack build (→ `out/`)                    |
 | `npm test`                | Run the extension test suite (vscode-test)             |
@@ -75,12 +75,14 @@ src/
 resources/
   icons/           # SVG / PNG
   walkthrough/     # Markdown for the Getting Started walkthrough
-  targets/         # Built-in target JSON + REFERENCES.md
+  tool-sets/       # Chat tool-set bundle (freeocd.toolsets.jsonc)
 
-vendor/dapjs/      # git submodule (MIT)
+vendor/dapjs/         # git submodule (MIT) — DAPjs UMD bundle
+vendor/freeocd-web/   # git submodule (BSD-3-Clause) — shared target tree
+                      # (public/targets/ is copied to out/targets/ at build)
 
 scripts/
-  validate-targets.js  # CI target JSON validator
+  validate-targets.js  # CI target JSON validator (walks vendor/freeocd-web)
 ```
 
 ## Code style
@@ -93,16 +95,30 @@ scripts/
 
 ## Adding a new target MCU
 
-1. Drop a JSON file in `resources/targets/<platform>/<family>/<mcu>.json`.
-2. Run `npm run lint:targets` (also invoked in CI).
-3. If you are introducing a brand-new platform:
+The canonical target MCU tree lives in the [`freeocd-web`](https://github.com/FreeOCD/freeocd-web)
+sister project and is vendored into this repository as a git submodule at
+`vendor/freeocd-web/public/targets/`. Both front-ends share the same JSON so
+target support added in one front-end is automatically available in the other.
+
+1. In the `freeocd-web` repository, drop a JSON file at
+   `public/targets/<platform>/<family>/<mcu>.json` and add the ID to
+   `public/targets/index.json`. See `freeocd-web`'s CONTRIBUTING.md for the
+   full procedure (including probe-filters.json if the MCU ships with a new
+   CMSIS-DAP probe VID).
+2. In this repository, bump the submodule:
+   `git submodule update --remote vendor/freeocd-web`.
+3. Run `npm run lint:targets` (also invoked in CI) — it walks the vendored
+   tree and validates every target JSON against the FreeOCD schema.
+4. If you are introducing a brand-new platform:
    - Implement `src/target/<platform>-handler.ts` extending `PlatformHandler`.
    - Register it in `PLATFORM_HANDLERS` in `src/target/target-manager.ts`.
-4. Add a short `REFERENCES.md` next to the JSON citing datasheets /
-   reference implementations used.
 5. From an MCP-enabled chat, run `/mcp.freeocd.add_new_mcu_support` — the
    prompt walks the AI through `describe_capabilities` → draft →
    `validate_target_definition` → `test_target_definition` → `flash_hex`.
+
+**Note**: Target JSONs must not carry a `usbFilters` field. CMSIS-DAP probe
+USB vendor IDs are managed centrally in
+`vendor/freeocd-web/public/targets/probe-filters.json`.
 
 ## Updating Chat tool sets
 

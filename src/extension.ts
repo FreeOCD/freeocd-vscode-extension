@@ -23,6 +23,8 @@ import { log, initLogger } from './common/logger';
 import { formatError } from './common/logger';
 import { FreeOcdError, NotConnectedError, NoTargetError } from './common/errors';
 import { loadDapjs } from './common/dapjs-loader';
+import { OperationLock } from './common/operation-lock';
+import { StateManager } from './common/state-manager';
 import type { FlashProgress, TargetDefinition } from './common/types';
 
 import { HidBackend, initProbeFilters } from './transport/hid-transport';
@@ -100,11 +102,214 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }
 
   // --------------------------------------------------------------------------
-  // Flasher + auto-flash
+  // Shared exclusive-operation lock + StateManager
+  //
+  // These two objects coordinate across every probe user (Flasher, RTT,
+  // MCP tools). Without them, two DAP transfers from different call sites
+  // can race on the single CMSIS-DAP v1 HID transport and wedge node-hid.
+  // See `src/common/operation-lock.ts` and `src/common/state-manager.ts`
+  // for the full rationale; this mirrors the `freeocd-web` design.
   // --------------------------------------------------------------------------
+  const operationLock = new OperationLock();
+  const stateManager = new StateManager();
+
+  // --------------------------------------------------------------------------
+  // RTT
+  // --------------------------------------------------------------------------
+  let rttHandler: RttHandler | undefined;
+  let rttTerminal: RttTerminal | undefined;
+
+  /**
+   * Tear down the RTT session and release the shared RTT lock.
+   *
+   * Used as:
+   *   1. the body of `freeocd.disconnectRtt`,
+   *   2. the pre-flash/recover cleanup hook (see `onBeforeOperation` below), and
+   *   3. the StateManager `onConnectionLost` callback (probe went away).
+   *
+   * Safe to call when RTT is already disconnected. Swallows errors from
+   * the underlying RTT reset so callers can always run it unconditionally
+   * in a `finally` block.
+   */
+  async function teardownRtt(reason?: string): Promise<void> {
+    // Always stop the poll loop first — continuing to issue DAP transfers
+    // while we're disposing the terminal only invites more failures.
+    stateManager.stopPolling();
+    stateManager.attachProcessor(null);
+    if (rttTerminal) {
+      try {
+        rttTerminal.dispose();
+      } catch (err) {
+        log.warn(`RTT terminal dispose error: ${(err as Error).message}`);
+      }
+      rttTerminal = undefined;
+    }
+    if (rttHandler) {
+      try {
+        rttHandler.reset();
+      } catch (err) {
+        log.warn(`RTT handler reset error: ${(err as Error).message}`);
+      }
+      rttHandler = undefined;
+    }
+    operationLock.release('RTT');
+    debuggerTree.refresh();
+    publishStatus();
+    if (reason) {
+      log.info(`RTT torn down: ${reason}`);
+    }
+  }
+
+  stateManager.setCallbacks({
+    onConnectionLost: async (err) => {
+      log.warn(`StateManager detected connection loss: ${err.message}`);
+      vscode.window.showWarningMessage(
+        vscode.l10n.t('RTT disconnected: {0}', err.message)
+      );
+      await teardownRtt('connection lost');
+    }
+  });
+
+  /**
+   * Shared RTT connect flow used by both `freeocd.connectRtt` (UI command)
+   * and MCP tool handlers (`rtt_connect`). Mirrors `freeocd-web`'s
+   * `connectRtt()`:
+   *
+   *   1. Acquire the shared `RTT` slot of the operation lock (so Flash /
+   *      Recover triggered concurrently from MCP or Tasks gets
+   *      OPERATION_BUSY instead of racing on the transport).
+   *   2. Soft-reset + halt the target to guarantee the RTT control block
+   *      is in a clean state before we scan for it.
+   *   3. Scan for the SEGGER RTT signature.
+   *   4. Resume the target so firmware can actually produce RTT traffic.
+   *   5. Attach the Cortex-M handle to the `StateManager` poll loop so a
+   *      probe disappearance automatically tears the session down.
+   *
+   * Returns the handler on success or `null` when the scan finds no
+   * control block. Throws `OPERATION_BUSY` on lock conflict and propagates
+   * any DAP transfer error from the underlying `RttHandler.init()` /
+   * `softReset` / `halt` calls.
+   */
+  async function connectRttCore(options?: {
+    scanStart?: number;
+    scanRange?: number;
+  }): Promise<RttHandler | null> {
+    if (!connection.isConnected()) {
+      throw new NotConnectedError();
+    }
+    if (!targets.getCurrent()) {
+      throw new NoTargetError();
+    }
+    if (!operationLock.tryAcquire('RTT', 'connectRttCore')) {
+      const held = operationLock.getCurrent();
+      throw new FreeOcdError(
+        `Cannot connect RTT: ${held ?? 'another'} operation is already in progress.`,
+        'OPERATION_BUSY'
+      );
+    }
+
+    let lockOwned = true;
+    try {
+      const config = vscode.workspace.getConfiguration('freeocd');
+      const { RttHandler } = await import('./rtt/rtt-handler');
+      const dapjs = loadDapjs();
+      const processor = new dapjs.CortexM(connection.getDap().proxy) as {
+        softReset(): Promise<void>;
+        halt(): Promise<void>;
+        resume(): Promise<void>;
+        getState(): Promise<unknown>;
+      };
+
+      log.info('RTT: issuing soft reset + halt to clean up target state...');
+      try {
+        await processor.softReset();
+        await new Promise((r) => setTimeout(r, 1000));
+        await processor.halt();
+      } catch (err) {
+        // Non-fatal: some targets (already-halted, locked, or in a
+        // transient reset state) may reject one of these. Continue and
+        // let the subsequent scan decide.
+        log.warn(`RTT pre-init reset warning: ${(err as Error).message}`);
+      }
+
+      const scanStart =
+        options?.scanStart ?? parseInt(config.get<string>('rtt.scanStart', '0x20000000'), 16);
+      const scanRange =
+        options?.scanRange ?? parseInt(config.get<string>('rtt.scanRange', '0x10000'), 16);
+      const handler = new RttHandler(processor as never, {
+        scanStartAddress: scanStart,
+        scanRange
+      });
+      const count = await handler.init();
+      if (count < 0) {
+        return null;
+      }
+
+      try {
+        await processor.resume();
+      } catch (err) {
+        log.warn(`RTT resume warning: ${(err as Error).message}`);
+      }
+
+      rttHandler = handler;
+      stateManager.attachProcessor(processor);
+      stateManager.startPolling();
+      // Session now owns the RTT lock for its entire lifetime; only
+      // `teardownRtt()` will release it. Flip the flag so the `finally`
+      // block below skips its cleanup path.
+      lockOwned = false;
+      debuggerTree.refresh();
+      publishStatus();
+      return handler;
+    } finally {
+      if (lockOwned) {
+        operationLock.release('RTT');
+      }
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Flasher + auto-flash
+  //
+  // The flasher is wired with the shared `OperationLock` plus before/after
+  // hooks that (a) disconnect RTT so the operation owns the DAP transport
+  // and (b) pause the StateManager poll loop so its health-check transfers
+  // don't race with the flash.
+  // --------------------------------------------------------------------------
+  let rttWasConnectedBeforeOperation = false;
+
   const flasher = new Flasher({
     getDap: () => connection.getDap().adi,
-    getHandler: () => targets.createHandler()
+    getHandler: () => targets.createHandler(),
+    lock: operationLock,
+    onBeforeOperation: async (op) => {
+      // StateManager must stop polling before we take over the transport;
+      // the external-operation flag handles the "poll tick is already
+      // mid-await" race (the tick will observe the flag on its next
+      // iteration and skip).
+      stateManager.setExternalOperationInProgress(true);
+      stateManager.stopPolling();
+      rttWasConnectedBeforeOperation = rttHandler !== undefined;
+      if (rttWasConnectedBeforeOperation) {
+        log.info(`${op}: RTT is connected, disconnecting for the operation...`);
+        await teardownRtt(`preparing for ${op}`);
+      }
+    },
+    onAfterOperation: async () => {
+      stateManager.setExternalOperationInProgress(false);
+      if (rttWasConnectedBeforeOperation) {
+        // We deliberately do not auto-reconnect RTT — this matches the
+        // freeocd-web UX where the user must re-click "Connect RTT" after
+        // a flash. Auto-reconnect would be surprising (the target may have
+        // just been mass-erased and the RTT control block is gone).
+        vscode.window.showInformationMessage(
+          vscode.l10n.t(
+            'RTT was disconnected for the operation. Reconnect it manually when you are ready.'
+          )
+        );
+        rttWasConnectedBeforeOperation = false;
+      }
+    }
   });
   const autoFlash = new AutoFlashWatcher(flasher);
 
@@ -119,12 +324,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const folder = vscode.workspace.workspaceFolders?.[0];
     return folder ? vscode.Uri.joinPath(folder.uri, raw) : undefined;
   };
-
-  // --------------------------------------------------------------------------
-  // RTT
-  // --------------------------------------------------------------------------
-  let rttHandler: RttHandler | undefined;
-  let rttTerminal: RttTerminal | undefined;
 
   // --------------------------------------------------------------------------
   // Session log + MCP
@@ -166,6 +365,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     setRtt: (h) => {
       rttHandler = h;
     },
+    connectRtt: (opts) => connectRttCore(opts),
+    disconnectRtt: () => teardownRtt('MCP rtt_disconnect'),
     autoFlash,
     flashProgress
   };
@@ -175,10 +376,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const mcpEnabled = vscode.workspace.getConfiguration('freeocd').get<boolean>('mcp.enabled', true);
   bridge.setEnabled(mcpEnabled);
 
+  // EventEmitter bridged into `McpServerDefinitionProvider.onDidChangeMcpServerDefinitions`
+  // so a user toggling `freeocd.mcp.enabled` forces VSCode to re-query
+  // the provider instead of requiring a window reload.
+  const mcpProviderChangeEmitter = new vscode.EventEmitter<void>();
+  context.subscriptions.push(mcpProviderChangeEmitter);
+
   const mcpProvider = registerMcpProvider({
     serverJs: vscode.Uri.joinPath(context.extensionUri, 'out', 'mcp-server.js').fsPath,
     extensionDir: context.extensionUri.fsPath,
-    ipcDir: ipcDir.fsPath
+    ipcDir: ipcDir.fsPath,
+    version: context.extension.packageJSON.version as string | undefined,
+    onDidChange: mcpProviderChangeEmitter.event
   });
   if (mcpProvider) {
     context.subscriptions.push(mcpProvider);
@@ -455,36 +664,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     vscode.commands.registerCommand('freeocd.connectRtt', async () => {
       try {
-        if (!connection.isConnected()) {
-          throw new NotConnectedError();
-        }
-        const target = targets.getCurrent();
-        if (!target) {
-          throw new NoTargetError();
-        }
-        const config = vscode.workspace.getConfiguration('freeocd');
-        const { RttHandler } = await import('./rtt/rtt-handler');
-        const dapjs = loadDapjs();
-        const processor = new dapjs.CortexM(connection.getDap().proxy);
-        const handler = new RttHandler(processor as never, {
-          scanStartAddress: parseInt(config.get<string>('rtt.scanStart', '0x20000000'), 16),
-          scanRange: parseInt(config.get<string>('rtt.scanRange', '0x10000'), 16)
-        });
-        const count = await handler.init();
-        if (count < 0) {
+        const handler = await connectRttCore();
+        if (!handler) {
           vscode.window.showWarningMessage(
             vscode.l10n.t('RTT control block not found in scan range.')
           );
           return;
         }
-        rttHandler = handler;
         const state = handler.getState();
         vscode.window.showInformationMessage(
-          vscode.l10n.t('RTT connected ({0} up, {1} down buffers).', state.numBufUp, state.numBufDown)
+          vscode.l10n.t(
+            'RTT connected ({0} up, {1} down buffers).',
+            state.numBufUp,
+            state.numBufDown
+          )
         );
-        debuggerTree.refresh();
-        publishStatus();
-
+        const config = vscode.workspace.getConfiguration('freeocd');
         if (config.get<boolean>('rtt.autoOpenTerminal', true)) {
           await vscode.commands.executeCommand('freeocd.openRttTerminal');
         }
@@ -494,12 +689,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }),
 
     vscode.commands.registerCommand('freeocd.disconnectRtt', async () => {
-      rttHandler?.reset();
-      rttHandler = undefined;
-      rttTerminal?.dispose();
-      rttTerminal = undefined;
-      debuggerTree.refresh();
-      publishStatus();
+      await teardownRtt('user requested disconnect');
       vscode.window.showInformationMessage(vscode.l10n.t('RTT disconnected.'));
     }),
 
@@ -572,6 +762,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         bridge.setEnabled(
           vscode.workspace.getConfiguration('freeocd').get<boolean>('mcp.enabled', true)
         );
+        // Also nudge VSCode's MCP layer so it re-queries the provider and
+        // picks up the new enabled state without a window reload.
+        mcpProviderChangeEmitter.fire();
       }
       if (e.affectsConfiguration('freeocd.mcp.sessionLogSize')) {
         sessionLog.setCapacity(
@@ -606,8 +799,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     { dispose: () => mcpStatusTree.dispose() },
     { dispose: () => hexDecoration.dispose() },
     { dispose: () => bridge.dispose() },
-    { dispose: () => rttTerminal?.dispose() }
+    { dispose: () => rttTerminal?.dispose() },
+    { dispose: () => stateManager.dispose() },
+    { dispose: () => operationLock.dispose() }
   );
+
+  // Tear RTT down automatically when the probe is disconnected — otherwise
+  // the StateManager poll loop keeps hitting a dead DAP proxy and spams
+  // warnings. This fires for both user-initiated disconnects
+  // (`freeocd.disconnectProbe`) and error-induced transitions.
+  connection.on('stateChanged', (info) => {
+    if (info.state !== 'connected' && rttHandler) {
+      void teardownRtt(`probe state -> ${info.state}`);
+    }
+  });
 
   publishStatus();
   log.info('FreeOCD extension activation complete.');

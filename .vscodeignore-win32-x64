@@ -6,6 +6,8 @@ src/**
 scripts/**
 vendor/dapjs/**
 !vendor/dapjs/LICENSE
+vendor/freeocd-web/**
+!vendor/freeocd-web/LICENSE
 node_modules/**
 !node_modules/node-hid/package.json
 !node_modules/node-hid/nodehid.js
@@ -29,6 +31,8 @@ AI_REVIEW.md
 .vscodeignore-*
 resources/**
 out/test/**
+vsix-downloads/**
+ci-logs/**
 out/icons/freeocd-marketplace.svg
 **/*.map
 **/*.ts

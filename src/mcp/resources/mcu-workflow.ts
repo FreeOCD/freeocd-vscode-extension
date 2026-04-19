@@ -34,6 +34,9 @@ Use the bundled schema:
 - Fetch \`reference://targets/nrf54l15\` for a worked example.
 - Target ids are of the form \`<platform>/<family>/<mcu>\`, e.g. \`stm32/g4/stm32g491\`.
 - **All addresses must be hex strings**, e.g. \`"0x5004B000"\`.
+- **Do NOT include a \`usbFilters\` field.** CMSIS-DAP probe vendor IDs are
+  managed centrally in \`probe-filters.json\` inside the \`freeocd-web\`
+  sister project and are orthogonal to the target MCU.
 
 ## 4. Validate
 
@@ -64,9 +67,20 @@ known-good firmware and call \`flash_hex\`. Finish with \`verify_hex\`.
 
 ## 8. Upstream the target
 
-Once it works, open a PR against \`FreeOCD/freeocd-vscode-extension\`. The
-\`.github/ISSUE_TEMPLATE/new_mcu_support.yml\` form covers the information
-reviewers need. If a brand-new platform handler is required, split that into
-a separate PR (\`src/target/<platform>-handler.ts\` + registration in
-\`PLATFORM_HANDLERS\`).
+The canonical target tree lives in the \`FreeOCD/freeocd-web\` sister project
+and is vendored into this extension as a git submodule at
+\`vendor/freeocd-web/public/targets/\`. Both front-ends share the same JSON.
+
+1. Open a PR against \`FreeOCD/freeocd-web\` adding the new JSON under
+   \`public/targets/<platform>/<family>/<mcu>.json\` and registering its id in
+   \`public/targets/index.json\`. If the MCU ships with a new CMSIS-DAP probe
+   VID, also update \`public/targets/probe-filters.json\`.
+2. Once that PR merges, open a PR against \`FreeOCD/freeocd-vscode-extension\`
+   bumping the submodule pin (\`git submodule update --remote
+   vendor/freeocd-web\`). The
+   \`.github/ISSUE_TEMPLATE/new_mcu_support.yml\` form covers the information
+   reviewers need.
+3. If a brand-new platform handler is required, split that into a separate
+   PR in the extension repository (\`src/target/<platform>-handler.ts\` +
+   registration in \`PLATFORM_HANDLERS\`).
 `;

@@ -98,5 +98,15 @@
     ],
     "description": "FreeOCD session diagnostics",
     "icon": "history"
+  },
+  "freeocd-ai": {
+    "tools": [
+      "ai_diagnose_flash_failure",
+      "ai_generate_target_from_datasheet",
+      "ai_summarize_session",
+      "ai_suggest_target_fix"
+    ],
+    "description": "FreeOCD AI-assisted workflows (MCP sampling)",
+    "icon": "sparkle"
   }
 }

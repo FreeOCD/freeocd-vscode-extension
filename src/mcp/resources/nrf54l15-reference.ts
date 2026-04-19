@@ -5,7 +5,13 @@
 
 /**
  * Embedded reference copy of the nRF54L15 target definition. Kept in sync
- * with `resources/targets/nordic/nrf54/nrf54l15.json` by code review.
+ * with `vendor/freeocd-web/public/targets/nordic/nrf54/nrf54l15.json` (the
+ * canonical source of truth shared with the freeocd-web sister project) by
+ * code review.
+ *
+ * CMSIS-DAP probe USB filtering is managed centrally in
+ * `vendor/freeocd-web/public/targets/probe-filters.json`, so target
+ * definitions must not carry a `usbFilters` field.
  */
 export const NRF54L15_REFERENCE = JSON.stringify(
   {
@@ -41,7 +47,6 @@ export const NRF54L15_REFERENCE = JSON.stringify(
       address: '0x20000000',
       workAreaSize: '0x4000'
     },
-    usbFilters: [{ vendorId: '0x2886' }, { vendorId: '0x2e8a' }],
     capabilities: ['recover', 'flash', 'verify', 'rtt'],
     description: 'Nordic nRF54L15 (Cortex-M33, RRAMC)'
   },

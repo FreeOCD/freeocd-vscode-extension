@@ -27,6 +27,7 @@ import { rttTools } from './tools/rtt-tools';
 import { dapTools } from './tools/dap-tools';
 import { processorTools } from './tools/processor-tools';
 import { sessionTools } from './tools/session-tools';
+import { aiTools } from './tools/ai-tools';
 import { readAPReg } from '../dap/dap-operations';
 import { FreeOcdError, NotConnectedError, NoTargetError } from '../common/errors';
 import { log } from '../common/logger';
@@ -40,6 +41,18 @@ export interface McpToolContext {
   sessionLog: SessionLog;
   getRtt(): RttHandler | undefined;
   setRtt(handler: RttHandler | undefined): void;
+  /**
+   * Full RTT connect flow — acquires the shared RTT lock, issues the
+   * soft-reset + halt sequence mirrored from `freeocd-web`, scans for the
+   * control block, and attaches the Cortex-M processor to the
+   * `StateManager` poll loop. Must be preferred over ad-hoc
+   * `new RttHandler(...)` construction from MCP tool handlers so all the
+   * concurrency invariants (lock + state monitor) stay consistent with the
+   * UI command. Returns `null` if the control block could not be located.
+   */
+  connectRtt(options?: { scanStart?: number; scanRange?: number }): Promise<RttHandler | null>;
+  /** Full RTT disconnect flow — stops polling, disposes the handler, releases the lock. */
+  disconnectRtt(): Promise<void>;
   autoFlash: AutoFlashWatcher;
   /** Extension-wide latest flash progress, keyed by requestId. */
   flashProgress: Map<string, unknown>;
@@ -54,6 +67,17 @@ const ALL_TOOLS: ToolDefinition[] = [
   ...processorTools,
   ...sessionTools
 ];
+
+/**
+ * Tools surfaced through `describe_capabilities`.
+ *
+ * Includes `aiTools` on top of `ALL_TOOLS` so a single call to
+ * `describe_capabilities` gives an agent the full picture of every tool
+ * the MCP server exposes — including the `serverOnly` `ai_*` family that
+ * runs entirely inside the MCP server process and is therefore never
+ * dispatched through `dispatchMcpTool`.
+ */
+const DISCOVERABLE_TOOLS: ToolDefinition[] = [...ALL_TOOLS, ...aiTools];
 
 export async function dispatchMcpTool(
   req: McpRequest,
@@ -168,8 +192,7 @@ export async function dispatchMcpTool(
     case 'rtt_connect':
       return rttConnect(ctx, args);
     case 'rtt_disconnect':
-      ctx.getRtt()?.reset();
-      ctx.setRtt(undefined);
+      await ctx.disconnectRtt();
       return { ok: true };
     case 'rtt_read': {
       const rtt = requireExists(ctx.getRtt(), 'RTT not connected.');
@@ -261,8 +284,6 @@ async function rttConnect(ctx: McpToolContext, args: Record<string, unknown>): P
     throw new NotConnectedError();
   }
   const target = ctx.targets.getCurrent();
-  const { RttHandler } = await import('../rtt/rtt-handler');
-  const { proxy } = ctx.connection.getDap();
   const scanStart =
     typeof args.scanStart === 'number'
       ? (args.scanStart as number)
@@ -270,15 +291,14 @@ async function rttConnect(ctx: McpToolContext, args: Record<string, unknown>): P
   const scanRange =
     typeof args.scanRange === 'number' ? (args.scanRange as number) : 0x10000;
 
-  // DAPjs processor wrapper — we need a CortexM instance for RTT.
-  const dapjs = loadDapjs();
-  const processor = new dapjs.CortexM(proxy);
-  const handler = new RttHandler(processor as never, { scanStartAddress: scanStart, scanRange });
-  const count = await handler.init();
-  if (count < 0) {
+  // Delegate to the shared RTT connect flow so MCP-initiated sessions
+  // acquire the shared lock, run the soft-reset / halt sequence, and get
+  // attached to the `StateManager` poll loop — exactly the same way the
+  // UI command does.
+  const handler = await ctx.connectRtt({ scanStart, scanRange });
+  if (!handler) {
     throw new FreeOcdError('RTT control block not found in scan range.', 'RTT_NOT_FOUND');
   }
-  ctx.setRtt(handler);
   return handler.getState();
 }
 
@@ -290,9 +310,14 @@ function describeCapabilities(ctx: McpToolContext): unknown {
       'freeocd-rtt',
       'freeocd-target',
       'freeocd-low-level',
-      'freeocd-session'
+      'freeocd-session',
+      'freeocd-ai'
     ],
-    tools: ALL_TOOLS.map((t) => ({ name: t.name, toolSet: t.toolSet, description: t.description })),
+    tools: DISCOVERABLE_TOOLS.map((t) => ({
+      name: t.name,
+      toolSet: t.toolSet,
+      description: t.description
+    })),
     connection: ctx.connection.getInfo(),
     currentTarget: ctx.targets.getCurrent() ?? null,
     availableTargets: ctx.targets.list().map((t) => ({ id: t.id, name: t.name, platform: t.platform }))

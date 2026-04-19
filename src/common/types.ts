@@ -66,11 +66,6 @@ export interface MemoryRegion {
   pageSize?: string;
 }
 
-export interface UsbFilter {
-  vendorId: string | number;
-  productId?: string | number;
-}
-
 export type TargetCapability =
   | 'flash'
   | 'verify'
@@ -96,7 +91,6 @@ export interface TargetDefinition {
   flashController: FlashControllerDef;
   flash: MemoryRegion;
   sram: MemoryRegion;
-  usbFilters?: UsbFilter[];
   capabilities: TargetCapability[];
   description?: string;
   quirks?: Record<string, unknown>;
@@ -109,6 +103,10 @@ export interface FlashProgress {
   bytesWritten?: number;
   bytesTotal?: number;
   message?: string;
+  /** Milliseconds elapsed since the current phase started. */
+  elapsedMs?: number;
+  /** Estimated milliseconds remaining until the current phase completes. */
+  etaMs?: number;
 }
 
 export interface SessionLogEntry {
