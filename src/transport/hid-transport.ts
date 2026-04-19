@@ -28,20 +28,22 @@ import { log } from '../common/logger';
 const DEFAULT_PACKET_SIZE = 64;
 
 /**
- * CMSIS-DAP v1 HID vendor/product ID filter list.
+ * CMSIS-DAP v1 HID vendor-specific usage page.
  *
- * Includes the canonical CMSIS-DAP interface class (0x03 = HID) and a set of
- * well-known DAPLink / picoprobe / XIAO / NUCLEO / STLink vendor IDs seen in
- * the wild. The filter is intentionally broad: any HID device with a usage
- * page of 0xFF00 (vendor-specific) and a product string containing "CMSIS-DAP"
- * is considered a candidate.
+ * A HID device is considered a CMSIS-DAP probe candidate when either its USB
+ * vendor ID is listed in `probe-filters.json`, or its HID usage page equals
+ * this value (0xFF00), or its USB product string contains "CMSIS-DAP"
+ * (case-insensitive; the hyphen is optional to tolerate firmware labels such
+ * as "CMSISDAP" seen in the wild). These signals are combined with OR
+ * semantics.
  */
 export const CMSIS_DAP_USAGE_PAGE = 0xff00;
 
 /**
  * Known CMSIS-DAP probe vendor IDs loaded from `probe-filters.json`.
- * These vendor IDs are used to filter probes in addition to usagePage and
- * product name matching.
+ * Used alongside HID usage page and product name matching (OR semantics):
+ * a device is accepted when its vendor ID is in this list OR it already
+ * looks like a CMSIS-DAP probe by usagePage / product string.
  */
 let KNOWN_CMSIS_DAP_VENDOR_IDS: number[] = [];
 
@@ -71,7 +73,8 @@ export function initProbeFilters(extensionPath: string): void {
 
   log.warn(
     'Failed to load probe-filters.json from any known location ' +
-      `(${candidates.join(', ')}). Vendor ID filtering will be disabled.`
+      `(${candidates.join(', ')}). Probe detection will rely solely on the ` +
+      'HID usage page and product string.'
   );
 }
 
@@ -235,17 +238,15 @@ export class HidBackend implements TransportBackend {
       const product = device.product ?? '';
       const isCmsisDap =
         device.usagePage === CMSIS_DAP_USAGE_PAGE ||
-        /CMSIS-?DAP/i.test(product) ||
-        /DAPLink/i.test(product) ||
-        /Picoprobe/i.test(product);
+        /CMSIS-?DAP/i.test(product);
 
-      // Vendor ID filtering: if we have a list of known vendor IDs, only include devices from those vendors
-      // If the list is empty (e.g., JSON failed to load), skip this check to maintain backward compatibility
-      const isKnownProbe =
-        KNOWN_CMSIS_DAP_VENDOR_IDS.length === 0 ||
-        KNOWN_CMSIS_DAP_VENDOR_IDS.includes(device.vendorId);
+      // Vendor ID whitelist loaded from probe-filters.json. Combined with
+      // `isCmsisDap` via OR: a device is accepted if either signal matches.
+      // When the JSON failed to load, the list is empty and this check
+      // always returns false, so detection falls back to `isCmsisDap` alone.
+      const isKnownProbe = KNOWN_CMSIS_DAP_VENDOR_IDS.includes(device.vendorId);
 
-      if (!isCmsisDap || !isKnownProbe) {
+      if (!isCmsisDap && !isKnownProbe) {
         continue;
       }
 
