@@ -66,11 +66,6 @@ export interface MemoryRegion {
   pageSize?: string;
 }
 
-export interface UsbFilter {
-  vendorId: string | number;
-  productId?: string | number;
-}
-
 export type TargetCapability =
   | 'flash'
   | 'verify'
@@ -96,7 +91,6 @@ export interface TargetDefinition {
   flashController: FlashControllerDef;
   flash: MemoryRegion;
   sram: MemoryRegion;
-  usbFilters?: UsbFilter[];
   capabilities: TargetCapability[];
   description?: string;
   quirks?: Record<string, unknown>;

@@ -39,7 +39,7 @@ const DEFAULT_PACKET_SIZE = 64;
 export const CMSIS_DAP_USAGE_PAGE = 0xff00;
 
 /**
- * Known CMSIS-DAP probe vendor IDs loaded from resources/probe-filters.json.
+ * Known CMSIS-DAP probe vendor IDs loaded from `probe-filters.json`.
  * These vendor IDs are used to filter probes in addition to usagePage and
  * product name matching.
  */
@@ -49,15 +49,18 @@ let KNOWN_CMSIS_DAP_VENDOR_IDS: number[] = [];
  * Initialize vendor ID filter from JSON file.
  * This must be called after the extension context is available.
  *
- * `probe-filters.json` is copied by webpack's `CopyWebpackPlugin` into
- * `out/probe-filters.json` for packaged VSIXs. When running from source
- * (extension development host) the file also lives at
- * `resources/probe-filters.json`, so we try both locations.
+ * The canonical `probe-filters.json` is maintained in the `freeocd-web`
+ * sister project and vendored in as a git submodule at
+ * `vendor/freeocd-web/public/targets/probe-filters.json`. Webpack's
+ * `CopyWebpackPlugin` copies the whole `public/targets/` tree into
+ * `out/targets/` for packaged VSIXs. When running from source (extension
+ * development host) the file is loaded directly from the submodule path as a
+ * fallback.
  */
 export function initProbeFilters(extensionPath: string): void {
   const candidates = [
-    join(extensionPath, 'out', 'probe-filters.json'),
-    join(extensionPath, 'resources', 'probe-filters.json')
+    join(extensionPath, 'out', 'targets', 'probe-filters.json'),
+    join(extensionPath, 'vendor', 'freeocd-web', 'public', 'targets', 'probe-filters.json')
   ];
 
   for (const filtersPath of candidates) {
@@ -90,7 +93,39 @@ function tryLoadProbeFilters(filtersPath: string): boolean {
   if (!Array.isArray(vendorIds)) {
     return false;
   }
-  KNOWN_CMSIS_DAP_VENDOR_IDS = vendorIds.map((vid) => parseInt(String(vid), 16));
+  // Each entry must be an object of the form
+  // `{ "vid": "0x2E8A", "$comment": "Raspberry Pi — ..." }`.
+  //
+  // The legacy bare-hex-string form (`"0x2E8A"`) is no longer accepted —
+  // the canonical `probe-filters.json` ships in `freeocd-web` and has been
+  // migrated to the object form to carry a `$comment` describing each VID.
+  // Mirror this in `freeocd-web`'s `core/probe-filters.js` when bumping the
+  // submodule pin.
+  const parsed: number[] = [];
+  for (const entry of vendorIds) {
+    if (!entry || typeof entry !== 'object') {
+      log.warn(
+        'Skipping invalid vendor entry in probe-filters.json ' +
+          `(expected { vid: "0x..." }): ${JSON.stringify(entry)}`
+      );
+      continue;
+    }
+    const vidStr = (entry as { vid?: unknown }).vid;
+    if (typeof vidStr !== 'string') {
+      log.warn(
+        'Skipping invalid vendor entry in probe-filters.json ' +
+          `(missing string \`vid\`): ${JSON.stringify(entry)}`
+      );
+      continue;
+    }
+    const vid = parseInt(vidStr, 16);
+    if (Number.isNaN(vid)) {
+      log.warn(`Skipping invalid vendor ID in probe-filters.json: ${vidStr}`);
+      continue;
+    }
+    parsed.push(vid);
+  }
+  KNOWN_CMSIS_DAP_VENDOR_IDS = parsed;
   log.info(
     `Loaded ${KNOWN_CMSIS_DAP_VENDOR_IDS.length} CMSIS-DAP vendor IDs from ${filtersPath}: ` +
       KNOWN_CMSIS_DAP_VENDOR_IDS.map((vid) => '0x' + vid.toString(16)).join(', ')

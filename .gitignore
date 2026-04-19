@@ -16,6 +16,10 @@ node_modules/
 extract/
 *.zip
 
+# Local VSIX testing artefacts (downloaded / extracted VSIX trees, CI log dumps)
+vsix-downloads/
+ci-logs/
+
 # OS files
 .DS_Store
 Thumbs.db

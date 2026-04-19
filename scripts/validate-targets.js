@@ -3,10 +3,16 @@
  * SPDX-License-Identifier: BSD-3-Clause
  * SPDX-FileCopyrightText: Copyright (c) 2026, FreeOCD. All Rights Reserved.
  *
- * CI-side target JSON validator. Walks `resources/targets/**`, parses each
- * `.json`, and checks it against the FreeOCD target schema. Exits non-zero
- * on any validation failure so `npm run lint:targets` can be wired up as a
- * GitHub Actions step.
+ * CI-side target JSON validator. Walks `vendor/freeocd-web/public/targets/**`,
+ * parses each MCU `.json`, and checks it against the FreeOCD target schema.
+ * Exits non-zero on any validation failure so `npm run lint:targets` can be
+ * wired up as a GitHub Actions step.
+ *
+ * The canonical target tree lives in the `freeocd-web` sister project and is
+ * vendored in as a git submodule. Top-level `index.json` and
+ * `probe-filters.json` are not target definitions and are skipped here;
+ * `freeocd-web`'s own `scripts/validate-json.js` is the authoritative
+ * validator for those.
  */
 
 'use strict';
@@ -80,30 +86,57 @@ function validateTarget(file, data) {
   if (!Array.isArray(data.capabilities) || data.capabilities.length === 0) {
     fail(file, `capabilities must be a non-empty array`);
   }
-  if (data.usbFilters !== undefined && !Array.isArray(data.usbFilters)) {
-    fail(file, `usbFilters must be an array`);
+  // Probe USB filters are managed centrally in
+  // vendor/freeocd-web/public/targets/probe-filters.json; target JSONs must
+  // not carry their own `usbFilters` field. This mirrors the rule enforced
+  // by freeocd-web's own `scripts/validate-json.js`.
+  if (Object.prototype.hasOwnProperty.call(data, 'usbFilters')) {
+    fail(
+      file,
+      '`usbFilters` is no longer allowed in target definitions — add the ' +
+        'vendor ID to vendor/freeocd-web/public/targets/probe-filters.json instead'
+    );
   }
 }
 
-function walk(dir, out) {
+// Top-level files under `public/targets/` that are not MCU target definitions
+// and must be skipped by this validator.
+const NON_TARGET_FILES = new Set(['index.json', 'probe-filters.json']);
+
+function walk(dir, root, out) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      walk(full, out);
+      walk(full, root, out);
     } else if (entry.name.endsWith('.json')) {
+      const rel = path.relative(root, full);
+      // Skip non-target JSONs that live at the top level of the targets tree.
+      if (!rel.includes(path.sep) && NON_TARGET_FILES.has(entry.name)) {
+        continue;
+      }
       out.push(full);
     }
   }
 }
 
 function main() {
-  const root = path.resolve(__dirname, '..', 'resources', 'targets');
+  const root = path.resolve(
+    __dirname,
+    '..',
+    'vendor',
+    'freeocd-web',
+    'public',
+    'targets'
+  );
   if (!fs.existsSync(root)) {
-    process.stderr.write(`[validate-targets] directory not found: ${root}\n`);
+    process.stderr.write(
+      `[validate-targets] directory not found: ${root}\n` +
+        '[validate-targets] did you forget to run `git submodule update --init --recursive`?\n'
+    );
     process.exit(1);
   }
   const files = [];
-  walk(root, files);
+  walk(root, root, files);
   if (files.length === 0) {
     process.stderr.write(`[validate-targets] no target JSON files found under ${root}\n`);
     process.exit(1);

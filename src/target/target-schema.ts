@@ -21,13 +21,6 @@ const hexString = z
   .string()
   .regex(/^0x[0-9a-fA-F]+$/u, 'Expected a hex string like "0x12345678".');
 
-const usbFilter = z
-  .object({
-    vendorId: z.union([z.string(), z.number()]),
-    productId: z.union([z.string(), z.number()]).optional()
-  })
-  .strict();
-
 const flashControllerRegister = z
   .object({
     offset: hexString,
@@ -92,12 +85,26 @@ export const targetDefinitionSchema = z
     flashController,
     flash: memoryRegion,
     sram: memoryRegion,
-    usbFilters: z.array(usbFilter).optional(),
     capabilities: z.array(z.string()).min(1),
     description: z.string().optional(),
     quirks: z.record(z.string(), z.unknown()).optional()
   })
-  .passthrough();
+  .passthrough()
+  // `usbFilters` used to live in target JSONs but is now managed centrally
+  // in `vendor/freeocd-web/public/targets/probe-filters.json`. Reject it at
+  // runtime so the MCP `validate_target_definition` tool surfaces the same
+  // error as `scripts/validate-targets.js` in CI.
+  .superRefine((data, ctx) => {
+    if (Object.prototype.hasOwnProperty.call(data, 'usbFilters')) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['usbFilters'],
+        message:
+          '`usbFilters` is no longer allowed in target definitions — add the ' +
+          'vendor ID to vendor/freeocd-web/public/targets/probe-filters.json instead'
+      });
+    }
+  });
 
 /** Compact JSON-Schema representation exposed via MCP Resources. */
 export function targetDefinitionJsonSchema(): Record<string, unknown> {
@@ -202,17 +209,6 @@ export function targetDefinitionJsonSchema(): Record<string, unknown> {
         properties: {
           address: { type: 'string', pattern: '^0x[0-9a-fA-F]+$' },
           workAreaSize: { type: 'string', pattern: '^0x[0-9a-fA-F]+$' }
-        }
-      },
-      usbFilters: {
-        type: 'array',
-        items: {
-          type: 'object',
-          required: ['vendorId'],
-          properties: {
-            vendorId: { type: ['string', 'integer'] },
-            productId: { type: ['string', 'integer'] }
-          }
         }
       },
       capabilities: {

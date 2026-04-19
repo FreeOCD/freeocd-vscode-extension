@@ -195,8 +195,8 @@ Copy the tables into a GitHub Issue or PR comment. Fill the **Status** column:
 
 | ID | Priority | Check | Details | Key Files | Verification | Status |
 |----|----------|-------|---------|-----------|--------------|--------|
-| PKG-01 | High | `.vscodeignore` exclusions | Excludes `src/`, `vendor/` (except the shipped DAPjs dist), `scripts/`, `.github/`, build artefacts, source maps, `*.ts`, dev config files. | `.vscodeignore` | 🤖 Review exclusion patterns; run `vsce ls` and check for unexpected files | |
-| PKG-02 | High | Required inclusions | Includes `out/extension.js`, MCP server bundle, `resources/targets/`, `resources/tool-sets/`, `resources/walkthrough/`, icons, `l10n/`, `package.nls.*`, LICENSE, README, CHANGELOG. | `.vscodeignore`, `webpack.config.js` | Run `vsce ls` and verify all required files are present | |
+| PKG-01 | High | `.vscodeignore` exclusions | Excludes `src/`, `vendor/` (except the shipped DAPjs dist and the freeocd-web LICENSE), `scripts/`, `.github/`, build artefacts, source maps, `*.ts`, dev config files. | `.vscodeignore` | 🤖 Review exclusion patterns; run `vsce ls` and check for unexpected files | |
+| PKG-02 | High | Required inclusions | Includes `out/extension.js`, MCP server bundle, `out/targets/` (copied from `vendor/freeocd-web/public/targets/`), `resources/tool-sets/`, `resources/walkthrough/`, icons, `l10n/`, `package.nls.*`, LICENSE, README, CHANGELOG. | `.vscodeignore`, `webpack.config.js` | Run `vsce ls` and verify all required files are present | |
 | PKG-03 | High | node-hid runtime tree | Only the `node-hid` runtime subtree is included in `node_modules/`. Other dev dependencies stripped. | `.vscodeignore` | Inspect VSIX with `unzip -l`; verify only node-hid + its prebuilds are present | |
 | PKG-04 | High | 7-target VSIX build | `vsce package --target <platform>` succeeds for all 7 targets with the correct prebuilt binary. | `.github/workflows/release.yml` | Verify release matrix produces 7 artefacts | |
 | PKG-05 | Medium | No dev artefacts | Test output, source maps (except `nosources-source-map`), `*.ts`, lock file, config files excluded from VSIX. | `.vscodeignore` | 🤖 Run `vsce ls` and grep for test / dev files | |
@@ -260,7 +260,7 @@ Copy the tables into a GitHub Issue or PR comment. Fill the **Status** column:
 | ID | Priority | Check | Details | Key Files | Verification | Status |
 |----|----------|-------|---------|-----------|--------------|--------|
 | TST-01 | High | HEX parser unit tests | `hex-parser` has unit tests covering valid files, bad checksums, and all relevant record types. | `src/flasher/hex-parser.ts`, tests | Run `npm test` and verify coverage | |
-| TST-02 | High | Target schema tests | `target-schema` validates every bundled target JSON under `resources/targets/`. A lint script (`npm run lint:targets`) runs in CI. | `src/target/target-schema.ts`, `scripts/validate-targets.js`, `resources/targets/` | 🤖 Run `npm run lint:targets` | |
+| TST-02 | High | Target schema tests | `target-schema` validates every bundled target JSON under `vendor/freeocd-web/public/targets/`. A lint script (`npm run lint:targets`) runs in CI. | `src/target/target-schema.ts`, `scripts/validate-targets.js`, `vendor/freeocd-web/public/targets/` | 🤖 Run `npm run lint:targets` | |
 | TST-03 | High | Extension activation test | Extension activation test loads the extension without errors via `vscode-test`. | `.vscode-test.*`, `src/test/**` | Run `npm test` | |
 | TST-04 | Medium | Linux xvfb | `vscode-test` harness runs under `xvfb-run` on Linux in CI. macOS / Windows run directly. | `.github/workflows/ci.yml` | 🤖 Verify conditional `xvfb-run` in CI | |
 | TST-05 | Medium | Coverage gaps tracked | Modules without unit tests listed (currently: MCP tool handlers, RTT handler, flasher, connection manager) and tracked toward closure. | `src/test/`, progress notes | 🤖 List `src/**/*.ts` vs test files; identify untested modules | |
