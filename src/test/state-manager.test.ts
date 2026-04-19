@@ -33,6 +33,23 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Poll `predicate` every 5 ms until it returns true or `timeoutMs` elapses.
+ * Used for timing-sensitive poll-loop assertions so they are robust against
+ * timer drift on slow CI runners (macOS Node 20 has been observed to delay
+ * the first sub-50 ms `setTimeout` well past the nominal interval, which
+ * would cause fixed-wait assertions to flake).
+ */
+async function waitFor(
+  predicate: () => boolean,
+  timeoutMs: number
+): Promise<void> {
+  const start = Date.now();
+  while (!predicate() && Date.now() - start < timeoutMs) {
+    await wait(5);
+  }
+}
+
 suite('StateManager', () => {
   test('getState reports the initial (disconnected) snapshot', () => {
     const sm = new StateManager();
@@ -62,10 +79,12 @@ suite('StateManager', () => {
     sm.setPollIntervalMs(20);
     sm.attachProcessor(proc);
     sm.startPolling();
-    await wait(80);
+    // Wait for at least 2 ticks to land. We avoid a fixed sleep because
+    // timer drift on CI (notably macOS Node 20) can delay the first tick
+    // well past the nominal interval; a generous timeout keeps the test
+    // deterministic without making it quantitative about the exact rate.
+    await waitFor(() => proc.calls >= 2, 2000);
     sm.stopPolling();
-    // We expect at least 2 ticks inside 80 ms at a 20 ms interval. We
-    // avoid an exact count because timer drift on CI can be significant.
     assert.ok(proc.calls >= 2, `expected >=2 calls, got ${proc.calls}`);
     sm.dispose();
   });
@@ -96,7 +115,8 @@ suite('StateManager', () => {
     // from issuing any DAP transfers.
     assert.strictEqual(proc.calls, 0);
     sm.setExternalOperationInProgress(false);
-    await wait(60);
+    // Event-driven wait so the assertion does not flake on slow CI.
+    await waitFor(() => proc.calls >= 1, 2000);
     assert.ok(proc.calls >= 1, `expected resume, got ${proc.calls} calls`);
     sm.stopPolling();
     sm.dispose();
@@ -114,11 +134,11 @@ suite('StateManager', () => {
     });
     sm.attachProcessor(proc);
     sm.startPolling();
-    await wait(40);
     // Device was marked connected after the first successful getState().
+    await waitFor(() => sm.getState().isDeviceConnected, 2000);
     assert.strictEqual(sm.getState().isDeviceConnected, true);
     proc.setHealth(false);
-    await wait(80);
+    await waitFor(() => lost !== undefined, 2000);
     sm.stopPolling();
 
     assert.ok(lost, 'expected onConnectionLost to fire');
