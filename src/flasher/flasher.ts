@@ -17,12 +17,44 @@ import { parseIntelHex, type ParsedHex } from './hex-parser';
 import { FreeOcdError, CancelledError } from '../common/errors';
 import { log } from '../common/logger';
 import type { FlashProgress } from '../common/types';
+import type { OperationLock, OperationType } from '../common/operation-lock';
 
 export interface FlasherDeps {
   /** Return the currently connected DAP handle (throws if not connected). */
   getDap(): unknown;
   /** Return the platform handler for the selected target. */
   getHandler(): PlatformHandler;
+  /**
+   * Optional shared exclusive-operation lock. When provided, every
+   * flash / verify / recover / reset call acquires the lock for the
+   * appropriate operation type before running and releases it in a
+   * `finally` block. This is how the flasher coordinates with RTT (and
+   * any other probe user) without those callers having to know about
+   * each other. See `src/common/operation-lock.ts`.
+   */
+  lock?: OperationLock;
+  /**
+   * Invoked once before every flash / verify / recover / reset operation
+   * starts, **before** the shared `lock` is acquired and **before** any
+   * DAP transfer is issued. Use this hook to disconnect RTT (which also
+   * releases the `RTT` slot of the shared lock so the subsequent
+   * acquire can succeed) and stop the `StateManager` poll loop so
+   * those background DAP transfers do not race with the operation's
+   * foreground transfers.
+   *
+   * Errors thrown from this hook are logged and swallowed: a cleanup
+   * failure must not prevent the main operation from running (we'd
+   * rather flash successfully over a wedged RTT than not flash at all).
+   */
+  onBeforeOperation?: (op: OperationType) => void | Promise<void>;
+  /**
+   * Invoked after every flash / verify / recover / reset operation,
+   * whether it succeeded, failed, or was cancelled. Use this hook to
+   * clear the `StateManager` external-operation flag and update the UI.
+   * Errors are logged and swallowed (same rationale as
+   * `onBeforeOperation`).
+   */
+  onAfterOperation?: (op: OperationType) => void | Promise<void>;
 }
 
 export class Flasher {
@@ -43,18 +75,74 @@ export class Flasher {
     this.progressEmitter.dispose();
   }
 
-  private async runExclusive<T>(op: string, fn: () => Promise<T>): Promise<T> {
+  private async runExclusive<T>(
+    op: OperationType,
+    fn: () => Promise<T>
+  ): Promise<T> {
     if (this.inProgress) {
       throw new FreeOcdError(
         `Another flash operation is already in progress; cannot start ${op}.`,
         'FLASH_BUSY'
       );
     }
+    // Claim the Flasher-internal guard synchronously, BEFORE the first
+    // `await`, so two near-simultaneous entries (e.g. UI button + MCP tool
+    // racing) cannot both pass the `inProgress` check above.
     this.inProgress = true;
+
     try {
-      return await fn();
+      // Run the before-hook *before* trying to acquire the shared lock.
+      //
+      // The hook is responsible for tearing down RTT (which releases the
+      // 'RTT' slot of the shared lock); if we tried to acquire 'FLASH'
+      // while 'RTT' was still held, the acquire would fail with
+      // OPERATION_BUSY and the flash would abort with a confusing error
+      // message even though the user explicitly asked us to take over
+      // the probe. Errors from the hook are swallowed so a wedged RTT
+      // cleanup cannot permanently block flashing.
+      await this.runHook('onBeforeOperation', op);
+
+      // Acquire the shared cross-entry-point lock (coordinates with RTT
+      // and any future probe user).
+      const lock = this.deps.lock;
+      const lockAcquired = lock ? lock.tryAcquire(op, `flasher:${op}`) : true;
+      if (!lockAcquired) {
+        const held = lock?.getCurrent();
+        throw new FreeOcdError(
+          `Cannot start ${op}: ${held ?? 'another'} operation is already in progress.`,
+          'OPERATION_BUSY'
+        );
+      }
+
+      try {
+        return await fn();
+      } finally {
+        if (lock) {
+          lock.release(op);
+        }
+      }
     } finally {
       this.inProgress = false;
+      // The after-hook always runs, even when the before-hook threw, so
+      // state-manager flags and UI state always return to a clean idle
+      // after every attempt. Errors from the hook are swallowed for the
+      // same reason as `onBeforeOperation`.
+      await this.runHook('onAfterOperation', op);
+    }
+  }
+
+  private async runHook(
+    name: 'onBeforeOperation' | 'onAfterOperation',
+    op: OperationType
+  ): Promise<void> {
+    const hook = this.deps[name];
+    if (!hook) {
+      return;
+    }
+    try {
+      await hook(op);
+    } catch (err) {
+      log.warn(`Flasher ${name} error: ${(err as Error).message}`);
     }
   }
 
@@ -77,7 +165,7 @@ export class Flasher {
     uri: vscode.Uri,
     options: { verifyAfterFlash?: boolean; requestId?: string } = {}
   ): Promise<void> {
-    return this.runExclusive('flash', async () => {
+    return this.runExclusive('FLASH', async () => {
       const requestId = options.requestId ?? genId();
       const hex = await this.loadHex(uri);
 
@@ -115,7 +203,7 @@ export class Flasher {
     uri: vscode.Uri,
     options: { requestId?: string } = {}
   ): Promise<{ success: boolean; mismatches: number }> {
-    return this.runExclusive('verify', async () => {
+    return this.runExclusive('VERIFY', async () => {
       const hex = await this.loadHex(uri);
       const requestId = options.requestId ?? genId();
       const result = await this.runVerifyWithProgress(uri, hex, requestId);
@@ -133,7 +221,7 @@ export class Flasher {
   }
 
   public async recover(options: { requestId?: string } = {}): Promise<void> {
-    return this.runExclusive('recover', async () => {
+    return this.runExclusive('RECOVER', async () => {
       const requestId = options.requestId ?? genId();
       const handler = this.deps.getHandler();
       const dap = this.deps.getDap();
@@ -202,7 +290,7 @@ export class Flasher {
   }
 
   public async softReset(): Promise<void> {
-    return this.runExclusive('soft reset', async () => {
+    return this.runExclusive('RESET', async () => {
       const handler = this.deps.getHandler();
       const dap = this.deps.getDap();
       try {

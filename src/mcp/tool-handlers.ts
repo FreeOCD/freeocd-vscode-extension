@@ -40,6 +40,18 @@ export interface McpToolContext {
   sessionLog: SessionLog;
   getRtt(): RttHandler | undefined;
   setRtt(handler: RttHandler | undefined): void;
+  /**
+   * Full RTT connect flow — acquires the shared RTT lock, issues the
+   * soft-reset + halt sequence mirrored from `freeocd-web`, scans for the
+   * control block, and attaches the Cortex-M processor to the
+   * `StateManager` poll loop. Must be preferred over ad-hoc
+   * `new RttHandler(...)` construction from MCP tool handlers so all the
+   * concurrency invariants (lock + state monitor) stay consistent with the
+   * UI command. Returns `null` if the control block could not be located.
+   */
+  connectRtt(options?: { scanStart?: number; scanRange?: number }): Promise<RttHandler | null>;
+  /** Full RTT disconnect flow — stops polling, disposes the handler, releases the lock. */
+  disconnectRtt(): Promise<void>;
   autoFlash: AutoFlashWatcher;
   /** Extension-wide latest flash progress, keyed by requestId. */
   flashProgress: Map<string, unknown>;
@@ -168,8 +180,7 @@ export async function dispatchMcpTool(
     case 'rtt_connect':
       return rttConnect(ctx, args);
     case 'rtt_disconnect':
-      ctx.getRtt()?.reset();
-      ctx.setRtt(undefined);
+      await ctx.disconnectRtt();
       return { ok: true };
     case 'rtt_read': {
       const rtt = requireExists(ctx.getRtt(), 'RTT not connected.');
@@ -261,8 +272,6 @@ async function rttConnect(ctx: McpToolContext, args: Record<string, unknown>): P
     throw new NotConnectedError();
   }
   const target = ctx.targets.getCurrent();
-  const { RttHandler } = await import('../rtt/rtt-handler');
-  const { proxy } = ctx.connection.getDap();
   const scanStart =
     typeof args.scanStart === 'number'
       ? (args.scanStart as number)
@@ -270,15 +279,14 @@ async function rttConnect(ctx: McpToolContext, args: Record<string, unknown>): P
   const scanRange =
     typeof args.scanRange === 'number' ? (args.scanRange as number) : 0x10000;
 
-  // DAPjs processor wrapper — we need a CortexM instance for RTT.
-  const dapjs = loadDapjs();
-  const processor = new dapjs.CortexM(proxy);
-  const handler = new RttHandler(processor as never, { scanStartAddress: scanStart, scanRange });
-  const count = await handler.init();
-  if (count < 0) {
+  // Delegate to the shared RTT connect flow so MCP-initiated sessions
+  // acquire the shared lock, run the soft-reset / halt sequence, and get
+  // attached to the `StateManager` poll loop — exactly the same way the
+  // UI command does.
+  const handler = await ctx.connectRtt({ scanStart, scanRange });
+  if (!handler) {
     throw new FreeOcdError('RTT control block not found in scan range.', 'RTT_NOT_FOUND');
   }
-  ctx.setRtt(handler);
   return handler.getState();
 }
 
