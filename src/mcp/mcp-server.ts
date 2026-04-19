@@ -39,9 +39,11 @@ import { rttTools } from './tools/rtt-tools';
 import { dapTools } from './tools/dap-tools';
 import { processorTools } from './tools/processor-tools';
 import { sessionTools } from './tools/session-tools';
+import { aiTools } from './tools/ai-tools';
 import type { ToolDefinition } from './tools/tool-registry';
 import { PROMPTS } from './prompts';
 import { buildStaticResources } from './resources';
+import { dispatchAiTool } from './ai-handlers';
 
 // Injected by webpack.DefinePlugin
 declare const EXTENSION_VERSION: string;
@@ -74,7 +76,8 @@ const ALL_TOOLS: ToolDefinition[] = [
   ...rttTools,
   ...dapTools,
   ...processorTools,
-  ...sessionTools
+  ...sessionTools,
+  ...aiTools
 ];
 
 const SERVER_INSTRUCTIONS = [
@@ -92,7 +95,12 @@ const SERVER_INSTRUCTIONS = [
   '  - #freeocd-rtt      (rtt_connect / rtt_read / rtt_write / get_rtt_status)',
   '  - #freeocd-target   (list_targets / get_target_info / create_target_definition / ...)',
   '  - #freeocd-low-level (dap_* / processor_*)',
-  '  - #freeocd-session  (describe_capabilities / get_session_log / get_last_error)'
+  '  - #freeocd-session  (describe_capabilities / get_session_log / get_last_error)',
+  '  - #freeocd-ai       (ai_diagnose_flash_failure / ai_generate_target_from_datasheet /',
+  '                       ai_summarize_session / ai_suggest_target_fix)',
+  '',
+  'AI tools (prefix `ai_`) use MCP sampling to delegate reasoning back to your',
+  'host LLM. The first call will prompt you to authorize model access.'
 ].join('\n');
 
 async function main(): Promise<void> {
@@ -102,6 +110,11 @@ async function main(): Promise<void> {
       version: EXTENSION_VERSION
     },
     {
+      // `sampling` is a CLIENT capability (the client answers the
+      // server-initiated `sampling/createMessage` request), so we do not
+      // declare it here. The `ai_*` tools in `ai-handlers.ts` simply call
+      // `server.createMessage(...)` and surface a tool error if the host
+      // client does not support sampling.
       capabilities: {
         tools: {},
         prompts: {},
@@ -138,7 +151,17 @@ async function main(): Promise<void> {
       );
     }
     try {
-      const result = await forwardRequest(tool.name, parseResult.data);
+      // `serverOnly` tools (the `ai_*` family) run entirely in this process
+      // because they drive MCP sampling against the host client. They may
+      // still call `forwardRequest` internally to gather extension-host
+      // context (session log, target info, etc.).
+      const result = tool.serverOnly
+        ? await dispatchAiTool(
+            tool.name,
+            parseResult.data as Record<string, unknown>,
+            { server, forward: forwardRequest }
+          )
+        : await forwardRequest(tool.name, parseResult.data);
       return {
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
       };

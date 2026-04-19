@@ -22,7 +22,8 @@ export type ToolSetName =
   | 'freeocd-rtt'
   | 'freeocd-target'
   | 'freeocd-low-level'
-  | 'freeocd-session';
+  | 'freeocd-session'
+  | 'freeocd-ai';
 
 export interface ToolDefinition<TArgs = unknown, _TResult = unknown> {
   name: string;
@@ -33,6 +34,12 @@ export interface ToolDefinition<TArgs = unknown, _TResult = unknown> {
   requiresConnection?: boolean;
   /** Requires a selected target MCU. */
   requiresTarget?: boolean;
+  /**
+   * If true, this tool runs entirely in the standalone MCP server process
+   * (typically because it uses MCP sampling) and is NOT forwarded to the
+   * extension host. AI / sampling tools must set this flag.
+   */
+  serverOnly?: boolean;
 }
 
 export type ToolDef = ToolDefinition<any, any>;
