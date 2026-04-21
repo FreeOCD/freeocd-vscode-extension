@@ -457,10 +457,10 @@
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
-    "@types/node": "22.x",
-    "@types/node-hid": "^1.3.4",
+    "@types/node": "25.x",
+    "@types/node-hid": "^3.0.0",
     "@types/vscode": "^1.102.0",
-    "@typescript-eslint/eslint-plugin": "^8.28.0",
+    "@typescript-eslint/eslint-plugin": "^8.59.0",
     "@typescript-eslint/parser": "^8.28.0",
     "@vscode/l10n-dev": "^0.0.35",
     "@vscode/test-cli": "^0.0.12",
