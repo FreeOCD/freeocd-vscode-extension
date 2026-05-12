@@ -109,7 +109,7 @@ jobs:
       - name: Package VSIX (${{ matrix.target }})
         run: npx --yes @vscode/vsce@3 package --target ${{ matrix.target }} --ignoreFile .vscodeignore-${{ matrix.target }} --out freeocd-extension-${{ matrix.target }}.vsix
       - name: Upload VSIX artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vsix-${{ matrix.target }}
           path: freeocd-extension-${{ matrix.target }}.vsix
