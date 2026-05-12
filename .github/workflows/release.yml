@@ -89,7 +89,7 @@ jobs:
           cache: npm
       - name: Set up QEMU (cross-build)
         if: matrix.cross
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
       - name: Install Linux system libs
         if: runner.os == 'Linux'
         run: |
