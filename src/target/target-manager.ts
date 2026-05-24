@@ -16,7 +16,7 @@
  */
 
 import * as vscode from 'vscode';
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import { targetDefinitionSchema } from './target-schema';
 import { PlatformHandler } from './platform-handler';
 import { NordicHandler } from './nordic-handler';

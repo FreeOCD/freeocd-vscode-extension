@@ -22,7 +22,7 @@
  * mode while still gating `recover` (destructive) behind confirmation.
  */
 
-import type { ZodType } from 'zod';
+import type { ZodType } from 'zod/v3';
 
 export type ToolSetName =
   | 'freeocd-flash'

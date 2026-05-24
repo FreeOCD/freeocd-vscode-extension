@@ -12,7 +12,7 @@
  * `rtt_*`, but the low-level set makes these available for deep debugging.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import type { ToolDefinition } from './tool-registry';
 
 const u32 = z.number().int().min(0).max(0xffffffff);

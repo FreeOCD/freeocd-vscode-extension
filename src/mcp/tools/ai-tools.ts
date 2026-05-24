@@ -17,7 +17,7 @@
  * host dispatcher does not attempt to route them over IPC.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import type { ToolDefinition } from './tool-registry';
 
 export const aiDiagnoseFlashFailureSchema = z
