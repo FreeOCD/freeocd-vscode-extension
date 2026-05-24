@@ -24,7 +24,7 @@ jobs:
           submodules: recursive
       - uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 22
           check-latest: true
           cache: npm
       - name: Install Linux system libs (for node-hid)
@@ -86,7 +86,7 @@ jobs:
           submodules: recursive
       - uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 22
           check-latest: true
           cache: npm
       - name: Set up QEMU (cross-build)
@@ -127,7 +127,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: 22
           check-latest: true
       - name: Install publishers
         run: npm install -g @vscode/vsce@3 ovsx@0
