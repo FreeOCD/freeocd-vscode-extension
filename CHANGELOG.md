@@ -6,6 +6,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.0.4] - 2026-05-24
+
+### Changed
+
+- **Dependencies**: Updated the extension dependency baseline while keeping
+  the VS Code extension host compatibility aligned with VS Code 1.102 and
+  Node.js 22. This includes newer MCP SDK, `node-hid`, TypeScript, ESLint,
+  webpack, VSCE, and Open VSX tooling versions.
+- **MCP / Targets**: Switched Zod imports used by MCP tool schemas and target
+  validation to `zod/v3` so the runtime schemas remain compatible with
+  `zod-to-json-schema` while the project can carry Zod 4 as its dependency.
+- **CI / Release**: Updated GitHub Actions used by CI and release packaging,
+  enabled latest Node 22 resolution for setup-node, and tightened marketplace
+  / Open VSX publish steps so failed package uploads correctly fail their
+  respective release step.
+- **Targets**: Updated the bundled `freeocd-web` target data submodule to
+  include the latest upstream dependency and workflow maintenance changes.
+
 ## [0.0.3] - 2026-04-20
 
 ### Changed
@@ -106,7 +124,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `activationEvents` is intentionally minimal (`onStartupFinished`); VS Code
   implicitly activates on commands / views / taskDefinitions / MCP providers.
 
-[Unreleased]: https://github.com/FreeOCD/freeocd-vscode-extension/compare/v0.0.3...HEAD
+[Unreleased]: https://github.com/FreeOCD/freeocd-vscode-extension/compare/v0.0.4...HEAD
+[0.0.4]: https://github.com/FreeOCD/freeocd-vscode-extension/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/FreeOCD/freeocd-vscode-extension/compare/v0.0.2...v0.0.3
 [0.0.2]: https://github.com/FreeOCD/freeocd-vscode-extension/releases/tag/v0.0.2
 [0.0.1]: https://github.com/FreeOCD/freeocd-vscode-extension/releases/tag/v0.0.1
