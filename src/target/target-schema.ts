@@ -15,7 +15,7 @@
  * and an open `quirks` map.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 
 const hexString = z
   .string()

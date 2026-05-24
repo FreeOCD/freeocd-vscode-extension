@@ -3,7 +3,7 @@
  * SPDX-FileCopyrightText: Copyright (c) 2026, FreeOCD. All Rights Reserved.
  */
 
-import { z } from 'zod';
+import { z } from 'zod/v3';
 import type { ToolDefinition } from './tool-registry';
 
 export const rttConnectSchema = z

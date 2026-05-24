@@ -21,7 +21,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
-import type { ZodType } from 'zod';
+import type { ZodType } from 'zod/v3';
 // `zod-to-json-schema` converts the Zod v3 schemas our tools declare into
 // JSON Schema Draft 2020-12 documents that ship in every `tools/list`
 // response. Already pulled in transitively by `@modelcontextprotocol/sdk`
