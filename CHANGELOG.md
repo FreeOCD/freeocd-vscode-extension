@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Nordic / nRF54L**: Flush the RRAM write buffer after flashing by reading
+  back the tail of the freshly written region. The RRAMC only commits the
+  last buffered word(s) to non-volatile storage on a MEM-AP read, so without
+  this the final word was silently lost when flashing without verify (an
+  enabled verify pass happened to mask the bug by reading the whole image
+  back).
+
 ## [0.0.4] - 2026-05-24
 
 ### Changed

@@ -211,6 +211,42 @@ export class NordicHandler extends PlatformHandler {
       onProgress(progress, `Flashed ${wordsWritten * 4} / ${firmware.length} bytes`);
     }
 
+    // Flush the flash controller's write buffer. The nRF54L RRAM holds the
+    // most recently written word(s) in a small buffer and only commits them
+    // to non-volatile storage on a coherency event; a MEM-AP read of the
+    // RRAM forces that commit, whereas the peripheral-register writes used to
+    // program it do not. Reading the tail of the freshly written region back
+    // guarantees the final word is committed before the device is reset.
+    // Without it the last word is silently lost (an enabled verify pass hides
+    // the bug because reading the whole image back performs the same flush).
+    const flushWords = Math.min(totalWords, CHUNK_WORDS);
+    if (flushWords > 0) {
+      const tailAddr = startAddress + (totalWords - flushWords) * 4;
+      try {
+        await dap.readBlock(tailAddr, flushWords);
+      } catch (err) {
+        // The multi-word block read can fail to assemble its
+        // `DAP_TRANSFER_BLOCK` packet even when a plain single MEM-AP read
+        // would still reach the hardware. Fall back to reading just the last
+        // written word, which is the minimal read needed to force the RRAM
+        // coherency commit, so a block-transfer hiccup does not leave the
+        // final word uncommitted while flashing still reports success.
+        const lastWordAddr = startAddress + (totalWords - 1) * 4;
+        log.warn(
+          `Flash flush block read-back failed at 0x${tailAddr.toString(16)}: ` +
+            `${(err as Error).message}; retrying last word at 0x${lastWordAddr.toString(16)}`
+        );
+        try {
+          await dap.readMem32(lastWordAddr);
+        } catch (retryErr) {
+          log.warn(
+            `Flash flush single-word read-back also failed at ` +
+              `0x${lastWordAddr.toString(16)}: ${(retryErr as Error).message}`
+          );
+        }
+      }
+    }
+
     log.info('Firmware write completed!');
   }
 
