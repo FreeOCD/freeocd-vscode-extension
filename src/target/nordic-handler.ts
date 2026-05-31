@@ -225,9 +225,25 @@ export class NordicHandler extends PlatformHandler {
       try {
         await dap.readBlock(tailAddr, flushWords);
       } catch (err) {
+        // The multi-word block read can fail to assemble its
+        // `DAP_TRANSFER_BLOCK` packet even when a plain single MEM-AP read
+        // would still reach the hardware. Fall back to reading just the last
+        // written word, which is the minimal read needed to force the RRAM
+        // coherency commit, so a block-transfer hiccup does not leave the
+        // final word uncommitted while flashing still reports success.
+        const lastWordAddr = startAddress + (totalWords - 1) * 4;
         log.warn(
-          `Flash flush read-back failed at 0x${tailAddr.toString(16)}: ${(err as Error).message}`
+          `Flash flush block read-back failed at 0x${tailAddr.toString(16)}: ` +
+            `${(err as Error).message}; retrying last word at 0x${lastWordAddr.toString(16)}`
         );
+        try {
+          await dap.readMem32(lastWordAddr);
+        } catch (retryErr) {
+          log.warn(
+            `Flash flush single-word read-back also failed at ` +
+              `0x${lastWordAddr.toString(16)}: ${(retryErr as Error).message}`
+          );
+        }
       }
     }
 
