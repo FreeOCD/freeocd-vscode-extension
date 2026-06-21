@@ -84,7 +84,10 @@ function main() {
     // npm install for dapjs own devDependencies (rollup, typescript, etc.)
     const nodeModulesPath = path.join(dapjsRoot, 'node_modules');
     if (!fs.existsSync(nodeModulesPath)) {
-      run('npm', ['install'], dapjsRoot);
+      const installArgs = fs.existsSync(path.join(dapjsRoot, 'package-lock.json'))
+        ? ['ci', '--ignore-scripts']
+        : ['install', '--ignore-scripts'];
+      run('npm', installArgs, dapjsRoot);
     } else {
       console.log('vendor/dapjs/node_modules already exists — skipping npm install');
     }
