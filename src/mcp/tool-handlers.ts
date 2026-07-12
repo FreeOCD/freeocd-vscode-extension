@@ -20,20 +20,13 @@ import type { SessionLog } from './session-log';
 import type { McpRequest } from './mcp-bridge';
 import type { AutoFlashWatcher } from '../flasher/auto-flash-watcher';
 
-import { connectionTools } from './tools/connection-tools';
-import { targetTools } from './tools/target-tools';
-import { flashTools } from './tools/flash-tools';
-import { rttTools } from './tools/rtt-tools';
-import { dapTools } from './tools/dap-tools';
-import { processorTools } from './tools/processor-tools';
-import { sessionTools } from './tools/session-tools';
-import { aiTools } from './tools/ai-tools';
+import { ALL_TOOLS, EXTENSION_TOOLS } from './tools';
 import { readAPReg } from '../dap/dap-operations';
 import { FreeOcdError, NotConnectedError, NoTargetError } from '../common/errors';
 import { log } from '../common/logger';
 import { loadDapjs } from '../common/dapjs-loader';
 import { resolveHexUri as resolveWorkspaceHexUri } from '../common/hex-path';
-import type { ToolDefinition } from './tools/tool-registry';
+import type { CortexMProcessor, DapAdi } from '../dap/dapjs-types';
 
 export interface McpToolContext {
   connection: ConnectionManager;
@@ -58,32 +51,21 @@ export interface McpToolContext {
   flashProgress: Map<string, unknown>;
 }
 
-const ALL_TOOLS: ToolDefinition[] = [
-  ...connectionTools,
-  ...targetTools,
-  ...flashTools,
-  ...rttTools,
-  ...dapTools,
-  ...processorTools,
-  ...sessionTools
-];
-
 /**
- * Tools surfaced through `describe_capabilities`.
- *
- * Includes `aiTools` on top of `ALL_TOOLS` so a single call to
- * `describe_capabilities` gives an agent the full picture of every tool
- * the MCP server exposes — including the `serverOnly` `ai_*` family that
- * runs entirely inside the MCP server process and is therefore never
- * dispatched through `dispatchMcpTool`.
+ * Handler signature for a single MCP tool executed in the extension host.
+ * Argument objects have already been validated against the tool's Zod
+ * schema by `dispatchMcpTool`.
  */
-const DISCOVERABLE_TOOLS: ToolDefinition[] = [...ALL_TOOLS, ...aiTools];
+type ToolHandler = (
+  ctx: McpToolContext,
+  args: Record<string, unknown>
+) => Promise<unknown> | unknown;
 
 export async function dispatchMcpTool(
   req: McpRequest,
   ctx: McpToolContext
 ): Promise<unknown> {
-  const tool = ALL_TOOLS.find((t) => t.name === req.tool);
+  const tool = EXTENSION_TOOLS.find((t) => t.name === req.tool);
   if (!tool) {
     throw new FreeOcdError(`Unknown tool: ${req.tool}`, 'UNKNOWN_TOOL');
   }
@@ -104,132 +86,125 @@ export async function dispatchMcpTool(
   const args = parsed.data as Record<string, unknown>;
   log.debug(`MCP tool ${tool.name} ${JSON.stringify(args)}`);
 
-  switch (tool.name) {
-    // --- Connection ---
-    case 'list_connection_methods':
-      return [{ method: 'hid', displayName: 'HID (CMSIS-DAP v1)' }];
-    case 'list_probes':
-      return ctx.connection.listProbes();
-    case 'connect_probe':
-      return connectProbe(ctx, args);
-    case 'disconnect_probe':
-      await ctx.connection.disconnect();
-      return { ok: true };
-    case 'get_connection_info':
-      return ctx.connection.getInfo();
+  const handler = HANDLERS[tool.name];
+  if (!handler) {
+    throw new FreeOcdError(`Unhandled tool: ${tool.name}`, 'UNHANDLED');
+  }
+  return handler(ctx, args);
+}
 
-    // --- Target ---
-    case 'list_targets':
-      return ctx.targets.list();
-    case 'get_target_info':
-      return requireExists(ctx.targets.get(String(args.id)), `Target not found: ${args.id}`);
-    case 'select_target':
-      return ctx.targets.select(String(args.id));
-    case 'create_target_definition':
-      return ctx.targets.save(ctx.targets.validate(args.target));
-    case 'update_target_definition': {
-      const existing = requireExists(
-        ctx.targets.get(String(args.id)),
-        `Target not found: ${args.id}`
-      );
-      const merged = { ...existing, ...(args.patch as Record<string, unknown>) };
-      return ctx.targets.save(ctx.targets.validate(merged));
-    }
-    case 'delete_target_definition':
-      await ctx.targets.delete(String(args.id));
-      return { ok: true };
-    case 'validate_target_definition':
-      try {
-        return { ok: true, target: ctx.targets.validate(args.target) };
-      } catch (err) {
-        return {
-          ok: false,
-          issues: (err as { details?: unknown }).details ?? [],
-          message: (err as Error).message
-        };
-      }
-    case 'test_target_definition':
-      return testTargetDefinition(ctx, String(args.id));
+const connectionHandlers: Record<string, ToolHandler> = {
+  list_connection_methods: () => [{ method: 'hid', displayName: 'HID (CMSIS-DAP v1)' }],
+  list_probes: (ctx) => ctx.connection.listProbes(),
+  connect_probe: (ctx, args) => connectProbe(ctx, args),
+  disconnect_probe: async (ctx) => {
+    await ctx.connection.disconnect();
+    return { ok: true };
+  },
+  get_connection_info: (ctx) => ctx.connection.getInfo()
+};
 
-    // --- Flash ---
-    case 'flash_hex': {
-      const uri = resolveHexUri(String(args.path));
-      await ctx.flasher.flash(uri, { verifyAfterFlash: Boolean(args.verify) });
-      return { ok: true };
+const targetHandlers: Record<string, ToolHandler> = {
+  list_targets: (ctx) => ctx.targets.list(),
+  get_target_info: (ctx, args) =>
+    requireExists(ctx.targets.get(String(args.id)), `Target not found: ${args.id}`),
+  select_target: (ctx, args) => ctx.targets.select(String(args.id)),
+  create_target_definition: (ctx, args) => ctx.targets.save(ctx.targets.validate(args.target)),
+  update_target_definition: (ctx, args) => {
+    const existing = requireExists(
+      ctx.targets.get(String(args.id)),
+      `Target not found: ${args.id}`
+    );
+    const merged = { ...existing, ...(args.patch as Record<string, unknown>) };
+    return ctx.targets.save(ctx.targets.validate(merged));
+  },
+  delete_target_definition: async (ctx, args) => {
+    await ctx.targets.delete(String(args.id));
+    return { ok: true };
+  },
+  validate_target_definition: (ctx, args) => {
+    try {
+      return { ok: true, target: ctx.targets.validate(args.target) };
+    } catch (err) {
+      return {
+        ok: false,
+        issues: (err as { details?: unknown }).details ?? [],
+        message: (err as Error).message
+      };
     }
-    case 'verify_hex': {
-      const uri = resolveHexUri(String(args.path));
-      return ctx.flasher.verify(uri);
+  },
+  test_target_definition: (ctx, args) => testTargetDefinition(ctx, String(args.id))
+};
+
+const flashHandlers: Record<string, ToolHandler> = {
+  flash_hex: async (ctx, args) => {
+    const uri = resolveHexUri(String(args.path));
+    await ctx.flasher.flash(uri, { verifyAfterFlash: Boolean(args.verify) });
+    return { ok: true };
+  },
+  verify_hex: (ctx, args) => ctx.flasher.verify(resolveHexUri(String(args.path))),
+  recover: async (ctx) => {
+    await ctx.flasher.recover();
+    return { ok: true };
+  },
+  get_flash_progress: (ctx, args) => ctx.flashProgress.get(String(args.requestId)) ?? null,
+  set_auto_flash_watch: async (ctx, args) => {
+    const path = args.path ? String(args.path) : undefined;
+    const enabled = Boolean(args.enabled);
+    if (!enabled) {
+      await ctx.autoFlash.update(undefined);
+    } else if (path) {
+      await ctx.autoFlash.update(resolveHexUri(path));
     }
-    case 'recover':
-      await ctx.flasher.recover();
-      return { ok: true };
-    case 'get_flash_progress':
-      return ctx.flashProgress.get(String(args.requestId)) ?? null;
-    case 'set_auto_flash_watch': {
-      const path = args.path ? String(args.path) : undefined;
-      const enabled = Boolean(args.enabled);
-      if (!enabled) {
-        await ctx.autoFlash.update(undefined);
-      } else if (path) {
-        await ctx.autoFlash.update(resolveHexUri(path));
-      }
-      if (args.confirmBeforeFlash !== undefined) {
-        await vscode.workspace
-          .getConfiguration('freeocd')
-          .update('autoFlash.confirmBeforeFlash', Boolean(args.confirmBeforeFlash), true);
-      }
+    if (args.confirmBeforeFlash !== undefined) {
       await vscode.workspace
         .getConfiguration('freeocd')
-        .update('autoFlash.enabled', enabled, true);
-      return { ok: true };
+        .update('autoFlash.confirmBeforeFlash', Boolean(args.confirmBeforeFlash), true);
     }
-    case 'soft_reset':
-      await ctx.flasher.softReset();
-      return { ok: true };
-
-    // --- RTT ---
-    case 'rtt_connect':
-      return rttConnect(ctx, args);
-    case 'rtt_disconnect':
-      await ctx.disconnectRtt();
-      return { ok: true };
-    case 'rtt_read': {
-      const rtt = requireExists(ctx.getRtt(), 'RTT not connected.');
-      const bytes = await rtt.read(Number(args.bufId ?? 0));
-      return { bytesBase64: bufferToBase64(bytes), length: bytes.length };
-    }
-    case 'rtt_write': {
-      const rtt = requireExists(ctx.getRtt(), 'RTT not connected.');
-      const payload = new TextEncoder().encode(String(args.data ?? ''));
-      const written = await rtt.write(payload, Number(args.bufId ?? 0));
-      return { written };
-    }
-    case 'get_rtt_status':
-      return ctx.getRtt()?.getState() ?? { connected: false, numBufUp: 0, numBufDown: 0 };
-
-    // --- Session ---
-    case 'describe_capabilities':
-      return describeCapabilities(ctx);
-    case 'get_session_log':
-      return ctx.sessionLog.list(
-        typeof args.limit === 'number' ? (args.limit as number) : undefined
-      );
-    case 'get_command_history':
-      return ctx.sessionLog.list(
-        typeof args.count === 'number' ? (args.count as number) : undefined
-      );
-    case 'get_last_error':
-      return ctx.sessionLog.lastError() ?? null;
-    case 'clear_session_log':
-      ctx.sessionLog.clear();
-      return { ok: true };
-
-    // --- DAP/processor low-level passthroughs ---
-    default:
-      return dispatchLowLevel(ctx, tool.name, args);
+    await vscode.workspace
+      .getConfiguration('freeocd')
+      .update('autoFlash.enabled', enabled, true);
+    return { ok: true };
+  },
+  soft_reset: async (ctx) => {
+    await ctx.flasher.softReset();
+    return { ok: true };
   }
-}
+};
+
+const rttHandlers: Record<string, ToolHandler> = {
+  rtt_connect: (ctx, args) => rttConnect(ctx, args),
+  rtt_disconnect: async (ctx) => {
+    await ctx.disconnectRtt();
+    return { ok: true };
+  },
+  rtt_read: async (ctx, args) => {
+    const rtt = requireExists(ctx.getRtt(), 'RTT not connected.');
+    const bytes = await rtt.read(Number(args.bufId ?? 0));
+    return { bytesBase64: bufferToBase64(bytes), length: bytes.length };
+  },
+  rtt_write: async (ctx, args) => {
+    const rtt = requireExists(ctx.getRtt(), 'RTT not connected.');
+    const payload = new TextEncoder().encode(String(args.data ?? ''));
+    const written = await rtt.write(payload, Number(args.bufId ?? 0));
+    return { written };
+  },
+  get_rtt_status: (ctx) =>
+    ctx.getRtt()?.getState() ?? { connected: false, numBufUp: 0, numBufDown: 0 }
+};
+
+const sessionHandlers: Record<string, ToolHandler> = {
+  describe_capabilities: (ctx) => describeCapabilities(ctx),
+  get_session_log: (ctx, args) =>
+    ctx.sessionLog.list(typeof args.limit === 'number' ? (args.limit as number) : undefined),
+  get_command_history: (ctx, args) =>
+    ctx.sessionLog.list(typeof args.count === 'number' ? (args.count as number) : undefined),
+  get_last_error: (ctx) => ctx.sessionLog.lastError() ?? null,
+  clear_session_log: (ctx) => {
+    ctx.sessionLog.clear();
+    return { ok: true };
+  }
+};
 
 function requireExists<T>(value: T | undefined, message: string): T {
   if (value === undefined || value === null) {
@@ -313,7 +288,7 @@ function describeCapabilities(ctx: McpToolContext): unknown {
       'freeocd-session',
       'freeocd-ai'
     ],
-    tools: DISCOVERABLE_TOOLS.map((t) => ({
+    tools: ALL_TOOLS.map((t) => ({
       name: t.name,
       toolSet: t.toolSet,
       description: t.description
@@ -327,140 +302,141 @@ function describeCapabilities(ctx: McpToolContext): unknown {
 // Declare the webpack-defined constant for the extension bundle too.
 declare const EXTENSION_VERSION: string;
 
-async function dispatchLowLevel(
-  ctx: McpToolContext,
-  tool: string,
-  args: Record<string, unknown>
-): Promise<unknown> {
-  if (!ctx.connection.isConnected()) {
-    throw new NotConnectedError();
-  }
-  const { adi, proxy } = ctx.connection.getDap();
-  // The low-level passthrough tools dispatch by method name onto whatever
-  // the loaded DAPjs build exposes (including methods beyond the typed
-  // `DapAdi` / `CmsisDapProxy` subsets), so this dispatcher stays
-  // reflective by design.
-  const adiRecord = adi as unknown as Record<string, unknown>;
-  const proxyRecord = proxy as unknown as Record<string, unknown>;
-
-  const callAdi = async (method: string, ...methodArgs: unknown[]): Promise<unknown> => {
-    const fn = adiRecord[method] as ((...a: unknown[]) => Promise<unknown>) | undefined;
-    if (typeof fn !== 'function') {
-      throw new FreeOcdError(`DAPjs ADI.${method} is not available.`, 'NO_METHOD');
-    }
-    return fn.apply(adi, methodArgs);
-  };
-
-  const callProxy = async (method: string, ...methodArgs: unknown[]): Promise<unknown> => {
-    const fn = proxyRecord[method] as ((...a: unknown[]) => Promise<unknown>) | undefined;
-    if (typeof fn !== 'function') {
-      throw new FreeOcdError(`DAPjs proxy.${method} is not available.`, 'NO_METHOD');
-    }
-    return fn.apply(proxy, methodArgs);
-  };
-
-  switch (tool) {
-    // Proxy
-    case 'dap_info':
-      return callProxy('dapInfo', args.key);
-    case 'dap_swj_clock':
-      return callProxy('swjClock', args.hz);
-    case 'dap_swj_sequence':
-      return callProxy('swjSequence', args.bits, args.sequence);
-    case 'dap_transfer_configure':
-      return callProxy('transferConfigure', args.idleCycles, args.waitRetry, args.matchRetry);
-    case 'dap_connect':
-      return callProxy('connect');
-    case 'dap_disconnect':
-      return callProxy('disconnect');
-    case 'dap_reconnect':
-      return callProxy('reconnect');
-    case 'dap_reset':
-      return callProxy('reset');
-
-    // DAP/ADI
-    case 'dap_read_dp':
-      return callAdi('readDP', args.reg);
-    case 'dap_write_dp':
-      return callAdi('writeDP', args.reg, args.value);
-    case 'dap_read_ap':
-      return readAPReg(adi, Number(args.apNum), Number(args.regOffset));
-    case 'dap_write_ap':
-      return callAdi('writeAP', args.apNum, args.regOffset, args.value);
-    case 'dap_read_mem8':
-      return callAdi('readMem8', args.address);
-    case 'dap_read_mem16':
-      return callAdi('readMem16', args.address);
-    case 'dap_read_mem32':
-      return callAdi('readMem32', args.address);
-    case 'dap_write_mem8':
-      return callAdi('writeMem8', args.address, args.value);
-    case 'dap_write_mem16':
-      return callAdi('writeMem16', args.address, args.value);
-    case 'dap_write_mem32':
-      return callAdi('writeMem32', args.address, args.value);
-    case 'dap_read_block': {
-      const words = await callAdi('readBlock', args.address, args.words);
-      return Array.from((words as Uint32Array) ?? []);
-    }
-    case 'dap_write_block':
-      return callAdi(
-        'writeBlock',
-        args.address,
-        new Uint32Array((args.values as number[]) ?? [])
-      );
-    case 'dap_read_bytes': {
-      const bytes = (await callAdi('readBytes', args.address, args.length)) as Uint8Array;
-      return { bytesBase64: bufferToBase64(bytes), length: bytes.length };
-    }
-    case 'dap_write_bytes': {
-      const bytes = base64ToBuffer(String(args.dataBase64 ?? ''));
-      return callAdi('writeBytes', args.address, bytes);
-    }
-
-    // Processor (CortexM wrapping)
-    default:
-      return dispatchProcessor(ctx, tool, args);
-  }
+interface DapCallers {
+  adi: DapAdi;
+  callAdi(method: string, ...methodArgs: unknown[]): Promise<unknown>;
+  callProxy(method: string, ...methodArgs: unknown[]): Promise<unknown>;
 }
 
-async function dispatchProcessor(
-  ctx: McpToolContext,
-  tool: string,
-  args: Record<string, unknown>
-): Promise<unknown> {
-  if (!ctx.connection.isConnected()) {
-    throw new NotConnectedError();
-  }
-  const { proxy } = ctx.connection.getDap();
-  const dapjs = loadDapjs();
-  const cortex = new dapjs.CortexM(proxy);
-
-  switch (tool) {
-    case 'processor_get_state':
-      return cortex.getState();
-    case 'processor_is_halted':
-      return cortex.isHalted();
-    case 'processor_halt':
-      await cortex.halt();
-      return { ok: true };
-    case 'processor_resume':
-      await cortex.resume();
-      return { ok: true };
-    case 'processor_read_core_register':
-      return cortex.readCoreRegister(Number(args.registerId));
-    case 'processor_read_core_registers':
-      return cortex.readCoreRegisters();
-    case 'processor_write_core_register':
-      await cortex.writeCoreRegister(Number(args.registerId), Number(args.value));
-      return { ok: true };
-    case 'processor_execute':
-      await cortex.execute(Number(args.address), new Uint32Array(args.code as number[]));
-      return { ok: true };
-    default:
-      throw new FreeOcdError(`Unhandled tool: ${tool}`, 'UNHANDLED');
-  }
+/**
+ * Wrap a low-level handler with connection checking and reflective DAP
+ * accessors. The low-level passthrough tools dispatch by method name onto
+ * whatever the loaded DAPjs build exposes (including methods beyond the
+ * typed `DapAdi` / `CmsisDapProxy` subsets), so `callAdi` / `callProxy`
+ * stay reflective by design.
+ */
+function dapHandler(
+  fn: (dap: DapCallers, args: Record<string, unknown>) => Promise<unknown> | unknown
+): ToolHandler {
+  return (ctx, args) => {
+    if (!ctx.connection.isConnected()) {
+      throw new NotConnectedError();
+    }
+    const { adi, proxy } = ctx.connection.getDap();
+    const adiRecord = adi as unknown as Record<string, unknown>;
+    const proxyRecord = proxy as unknown as Record<string, unknown>;
+    const callAdi = async (method: string, ...methodArgs: unknown[]): Promise<unknown> => {
+      const f = adiRecord[method] as ((...a: unknown[]) => Promise<unknown>) | undefined;
+      if (typeof f !== 'function') {
+        throw new FreeOcdError(`DAPjs ADI.${method} is not available.`, 'NO_METHOD');
+      }
+      return f.apply(adi, methodArgs);
+    };
+    const callProxy = async (method: string, ...methodArgs: unknown[]): Promise<unknown> => {
+      const f = proxyRecord[method] as ((...a: unknown[]) => Promise<unknown>) | undefined;
+      if (typeof f !== 'function') {
+        throw new FreeOcdError(`DAPjs proxy.${method} is not available.`, 'NO_METHOD');
+      }
+      return f.apply(proxy, methodArgs);
+    };
+    return fn({ adi, callAdi, callProxy }, args);
+  };
 }
+
+const dapHandlers: Record<string, ToolHandler> = {
+  // Proxy
+  dap_info: dapHandler((dap, args) => dap.callProxy('dapInfo', args.key)),
+  dap_swj_clock: dapHandler((dap, args) => dap.callProxy('swjClock', args.hz)),
+  dap_swj_sequence: dapHandler((dap, args) =>
+    dap.callProxy('swjSequence', args.bits, args.sequence)
+  ),
+  dap_transfer_configure: dapHandler((dap, args) =>
+    dap.callProxy('transferConfigure', args.idleCycles, args.waitRetry, args.matchRetry)
+  ),
+  dap_connect: dapHandler((dap) => dap.callProxy('connect')),
+  dap_disconnect: dapHandler((dap) => dap.callProxy('disconnect')),
+  dap_reconnect: dapHandler((dap) => dap.callProxy('reconnect')),
+  dap_reset: dapHandler((dap) => dap.callProxy('reset')),
+
+  // DAP/ADI
+  dap_read_dp: dapHandler((dap, args) => dap.callAdi('readDP', args.reg)),
+  dap_write_dp: dapHandler((dap, args) => dap.callAdi('writeDP', args.reg, args.value)),
+  dap_read_ap: dapHandler((dap, args) =>
+    readAPReg(dap.adi, Number(args.apNum), Number(args.regOffset))
+  ),
+  dap_write_ap: dapHandler((dap, args) =>
+    dap.callAdi('writeAP', args.apNum, args.regOffset, args.value)
+  ),
+  dap_read_mem8: dapHandler((dap, args) => dap.callAdi('readMem8', args.address)),
+  dap_read_mem16: dapHandler((dap, args) => dap.callAdi('readMem16', args.address)),
+  dap_read_mem32: dapHandler((dap, args) => dap.callAdi('readMem32', args.address)),
+  dap_write_mem8: dapHandler((dap, args) => dap.callAdi('writeMem8', args.address, args.value)),
+  dap_write_mem16: dapHandler((dap, args) => dap.callAdi('writeMem16', args.address, args.value)),
+  dap_write_mem32: dapHandler((dap, args) => dap.callAdi('writeMem32', args.address, args.value)),
+  dap_read_block: dapHandler(async (dap, args) => {
+    const words = await dap.callAdi('readBlock', args.address, args.words);
+    return Array.from((words as Uint32Array) ?? []);
+  }),
+  dap_write_block: dapHandler((dap, args) =>
+    dap.callAdi('writeBlock', args.address, new Uint32Array((args.values as number[]) ?? []))
+  ),
+  dap_read_bytes: dapHandler(async (dap, args) => {
+    const bytes = (await dap.callAdi('readBytes', args.address, args.length)) as Uint8Array;
+    return { bytesBase64: bufferToBase64(bytes), length: bytes.length };
+  }),
+  dap_write_bytes: dapHandler((dap, args) =>
+    dap.callAdi('writeBytes', args.address, base64ToBuffer(String(args.dataBase64 ?? '')))
+  )
+};
+
+/** Wrap a processor handler with connection checking and a fresh CortexM handle. */
+function processorHandler(
+  fn: (cortex: CortexMProcessor, args: Record<string, unknown>) => Promise<unknown> | unknown
+): ToolHandler {
+  return (ctx, args) => {
+    if (!ctx.connection.isConnected()) {
+      throw new NotConnectedError();
+    }
+    const { proxy } = ctx.connection.getDap();
+    const dapjs = loadDapjs();
+    return fn(new dapjs.CortexM(proxy), args);
+  };
+}
+
+const processorHandlers: Record<string, ToolHandler> = {
+  processor_get_state: processorHandler((cortex) => cortex.getState()),
+  processor_is_halted: processorHandler((cortex) => cortex.isHalted()),
+  processor_halt: processorHandler(async (cortex) => {
+    await cortex.halt();
+    return { ok: true };
+  }),
+  processor_resume: processorHandler(async (cortex) => {
+    await cortex.resume();
+    return { ok: true };
+  }),
+  processor_read_core_register: processorHandler((cortex, args) =>
+    cortex.readCoreRegister(Number(args.registerId))
+  ),
+  processor_read_core_registers: processorHandler((cortex) => cortex.readCoreRegisters()),
+  processor_write_core_register: processorHandler(async (cortex, args) => {
+    await cortex.writeCoreRegister(Number(args.registerId), Number(args.value));
+    return { ok: true };
+  }),
+  processor_execute: processorHandler(async (cortex, args) => {
+    await cortex.execute(Number(args.address), new Uint32Array(args.code as number[]));
+    return { ok: true };
+  })
+};
+
+const HANDLERS: Record<string, ToolHandler> = {
+  ...connectionHandlers,
+  ...targetHandlers,
+  ...flashHandlers,
+  ...rttHandlers,
+  ...sessionHandlers,
+  ...dapHandlers,
+  ...processorHandlers
+};
 
 function resolveHexUri(input: string): vscode.Uri {
   return resolveWorkspaceHexUri(input) ?? vscode.Uri.file(input);

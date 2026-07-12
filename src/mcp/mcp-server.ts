@@ -38,14 +38,7 @@ import {
   ReadResourceRequestSchema
 } from '@modelcontextprotocol/sdk/types.js';
 
-import { connectionTools } from './tools/connection-tools';
-import { targetTools } from './tools/target-tools';
-import { flashTools } from './tools/flash-tools';
-import { rttTools } from './tools/rtt-tools';
-import { dapTools } from './tools/dap-tools';
-import { processorTools } from './tools/processor-tools';
-import { sessionTools } from './tools/session-tools';
-import { aiTools } from './tools/ai-tools';
+import { ALL_TOOLS } from './tools';
 import type { ToolDefinition } from './tools/tool-registry';
 import { PROMPTS } from './prompts';
 import { buildStaticResources } from './resources';
@@ -74,17 +67,6 @@ function requestFileFor(requestId: string): string {
 function responseFileFor(requestId: string): string {
   return path.join(IPC_DIR!, `response-${requestId}.json`);
 }
-
-const ALL_TOOLS: ToolDefinition[] = [
-  ...connectionTools,
-  ...targetTools,
-  ...flashTools,
-  ...rttTools,
-  ...dapTools,
-  ...processorTools,
-  ...sessionTools,
-  ...aiTools
-];
 
 const SERVER_INSTRUCTIONS = [
   'FreeOCD exposes every DAP.js capability plus target/flash/RTT/session tools.',
