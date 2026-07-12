@@ -390,6 +390,16 @@ async function main(): Promise<void> {
   await server.connect(transport);
 }
 
+process.on('uncaughtException', (err) => {
+  console.error('[freeocd-mcp] Uncaught exception:', err);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[freeocd-mcp] Unhandled rejection:', reason);
+  process.exit(1);
+});
+
 main().catch((err) => {
   console.error('[freeocd-mcp] Fatal error:', err);
   process.exit(1);

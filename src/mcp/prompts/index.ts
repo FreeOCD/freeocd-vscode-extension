@@ -162,7 +162,7 @@ const DEBUG_FLASH_ERROR: PromptDefinition = {
       '',
       REPORT_FORMAT
     ]
-      .filter(Boolean)
+      .filter((line) => line !== undefined)
       .join('\n');
   }
 };
@@ -257,7 +257,7 @@ const TROUBLESHOOT_RTT: PromptDefinition = {
       '',
       REPORT_FORMAT
     ]
-      .filter(Boolean)
+      .filter((line) => line !== undefined)
       .join('\n');
   }
 };
