@@ -473,7 +473,9 @@ function watchStatusFile(server: Server): void {
   try {
     fs.mkdirSync(IPC_DIR!, { recursive: true });
     fs.watch(IPC_DIR!, (_event, filename) => {
-      if (filename !== 'status.json' || !subscribedUris.has(STATUS_RESOURCE_URI)) {
+      // `filename` can be null on some platforms (notably macOS); treat that
+      // as "something in the directory changed" and rely on the debounce.
+      if ((filename !== null && filename !== 'status.json') || !subscribedUris.has(STATUS_RESOURCE_URI)) {
         return;
       }
       if (debounce) {
