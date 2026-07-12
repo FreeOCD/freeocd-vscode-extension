@@ -42,7 +42,7 @@ Useful scripts:
 |---------------------------|--------------------------------------------------------|
 | `npm run lint`            | ESLint over `src/`                                     |
 | `npm run lint:targets`    | Validate every target JSON under `vendor/freeocd-web/public/targets/**` |
-| `npx tsc --noEmit -p .`   | Full TypeScript typecheck                              |
+| `npm run typecheck`       | Full TypeScript typecheck (TypeScript 7, same as CI)   |
 | `npm run compile`         | Production webpack build (→ `out/`)                    |
 | `npm test`                | Run the extension test suite (vscode-test)             |
 | `npm run package`         | `vsce package` — produces a VSIX                       |
