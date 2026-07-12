@@ -26,6 +26,7 @@ import type { ZodType } from 'zod/v3';
 // JSON Schema Draft 2020-12 documents that ship in every `tools/list`
 // response. Already pulled in transitively by `@modelcontextprotocol/sdk`
 // but declared directly in our package.json to lock the contract.
+import { pathToFileURL } from 'url';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -431,7 +432,7 @@ function serverIcons(): Array<{ src: string; mimeType: string }> | undefined {
   } catch {
     return undefined;
   }
-  return [{ src: `file://${iconPath}`, mimeType: 'image/png' }];
+  return [{ src: pathToFileURL(iconPath).href, mimeType: 'image/png' }];
 }
 
 /**
