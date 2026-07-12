@@ -241,6 +241,7 @@ async function main(): Promise<void> {
   server.setRequestHandler(ListPromptsRequestSchema, async () => ({
     prompts: PROMPTS.map((p) => ({
       name: p.name,
+      title: p.title,
       description: p.description,
       arguments: p.arguments.map((a) => ({
         name: a.name,
