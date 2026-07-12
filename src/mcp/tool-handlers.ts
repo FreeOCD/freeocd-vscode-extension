@@ -32,6 +32,7 @@ import { readAPReg } from '../dap/dap-operations';
 import { FreeOcdError, NotConnectedError, NoTargetError } from '../common/errors';
 import { log } from '../common/logger';
 import { loadDapjs } from '../common/dapjs-loader';
+import { resolveHexUri as resolveWorkspaceHexUri } from '../common/hex-path';
 import type { ToolDefinition } from './tools/tool-registry';
 
 export interface McpToolContext {
@@ -270,7 +271,7 @@ async function testTargetDefinition(ctx: McpToolContext, id: string): Promise<un
   const { adi } = ctx.connection.getDap();
   const result: Record<string, unknown> = { target: target.id };
   if (target.ctrlAp) {
-    const idr = await readAPReg(adi as object, target.ctrlAp.num, 0x0fc);
+    const idr = await readAPReg(adi, target.ctrlAp.num, 0x0fc);
     result.ctrlApIdr = idr !== undefined ? `0x${idr.toString(16).toUpperCase()}` : null;
     result.ctrlApIdrExpected = target.ctrlAp.idr;
     result.ctrlApIdrMatches =
@@ -335,13 +336,16 @@ async function dispatchLowLevel(
   if (!ctx.connection.isConnected()) {
     throw new NotConnectedError();
   }
-  const { adi, proxy } = ctx.connection.getDap() as {
-    adi: { [key: string]: unknown };
-    proxy: { [key: string]: unknown };
-  };
+  const { adi, proxy } = ctx.connection.getDap();
+  // The low-level passthrough tools dispatch by method name onto whatever
+  // the loaded DAPjs build exposes (including methods beyond the typed
+  // `DapAdi` / `CmsisDapProxy` subsets), so this dispatcher stays
+  // reflective by design.
+  const adiRecord = adi as unknown as Record<string, unknown>;
+  const proxyRecord = proxy as unknown as Record<string, unknown>;
 
   const callAdi = async (method: string, ...methodArgs: unknown[]): Promise<unknown> => {
-    const fn = adi[method] as ((...a: unknown[]) => Promise<unknown>) | undefined;
+    const fn = adiRecord[method] as ((...a: unknown[]) => Promise<unknown>) | undefined;
     if (typeof fn !== 'function') {
       throw new FreeOcdError(`DAPjs ADI.${method} is not available.`, 'NO_METHOD');
     }
@@ -349,7 +353,7 @@ async function dispatchLowLevel(
   };
 
   const callProxy = async (method: string, ...methodArgs: unknown[]): Promise<unknown> => {
-    const fn = proxy[method] as ((...a: unknown[]) => Promise<unknown>) | undefined;
+    const fn = proxyRecord[method] as ((...a: unknown[]) => Promise<unknown>) | undefined;
     if (typeof fn !== 'function') {
       throw new FreeOcdError(`DAPjs proxy.${method} is not available.`, 'NO_METHOD');
     }
@@ -381,7 +385,7 @@ async function dispatchLowLevel(
     case 'dap_write_dp':
       return callAdi('writeDP', args.reg, args.value);
     case 'dap_read_ap':
-      return readAPReg(adi as unknown as object, Number(args.apNum), Number(args.regOffset));
+      return readAPReg(adi, Number(args.apNum), Number(args.regOffset));
     case 'dap_write_ap':
       return callAdi('writeAP', args.apNum, args.regOffset, args.value);
     case 'dap_read_mem8':
@@ -431,16 +435,7 @@ async function dispatchProcessor(
   }
   const { proxy } = ctx.connection.getDap();
   const dapjs = loadDapjs();
-  const cortex = new dapjs.CortexM(proxy) as {
-    getState(): Promise<unknown>;
-    isHalted(): Promise<boolean>;
-    halt(): Promise<void>;
-    resume(): Promise<void>;
-    readCoreRegister(id: number): Promise<number>;
-    readCoreRegisters(): Promise<number[]>;
-    writeCoreRegister(id: number, value: number): Promise<void>;
-    execute(address: number, code: Uint32Array): Promise<void>;
-  };
+  const cortex = new dapjs.CortexM(proxy);
 
   switch (tool) {
     case 'processor_get_state':
@@ -469,14 +464,7 @@ async function dispatchProcessor(
 }
 
 function resolveHexUri(input: string): vscode.Uri {
-  if (input.startsWith('/') || /^[a-zA-Z]:[\\/]/u.test(input)) {
-    return vscode.Uri.file(input);
-  }
-  const folder = vscode.workspace.workspaceFolders?.[0];
-  if (folder) {
-    return vscode.Uri.joinPath(folder.uri, input);
-  }
-  return vscode.Uri.file(input);
+  return resolveWorkspaceHexUri(input) ?? vscode.Uri.file(input);
 }
 
 function bufferToBase64(bytes: Uint8Array): string {

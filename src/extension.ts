@@ -25,6 +25,7 @@ import { FreeOcdError, NotConnectedError, NoTargetError } from './common/errors'
 import { loadDapjs } from './common/dapjs-loader';
 import { OperationLock } from './common/operation-lock';
 import { StateManager } from './common/state-manager';
+import { resolveHexUri } from './common/hex-path';
 import type { FlashProgress, TargetDefinition } from './common/types';
 
 import { HidBackend, initProbeFilters } from './transport/hid-transport';
@@ -213,12 +214,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const config = vscode.workspace.getConfiguration('freeocd');
       const { RttHandler } = await import('./rtt/rtt-handler');
       const dapjs = loadDapjs();
-      const processor = new dapjs.CortexM(connection.getDap().proxy) as {
-        softReset(): Promise<void>;
-        halt(): Promise<void>;
-        resume(): Promise<void>;
-        getState(): Promise<unknown>;
-      };
+      const processor = new dapjs.CortexM(connection.getDap().proxy);
 
       log.info('RTT: issuing soft reset + halt to clean up target state...');
       try {
@@ -236,7 +232,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         options?.scanStart ?? parseInt(config.get<string>('rtt.scanStart', '0x20000000'), 16);
       const scanRange =
         options?.scanRange ?? parseInt(config.get<string>('rtt.scanRange', '0x10000'), 16);
-      const handler = new RttHandler(processor as never, {
+      const handler = new RttHandler(processor, {
         scanStartAddress: scanStart,
         scanRange
       });
@@ -315,14 +311,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const hexUriFromConfig = (): vscode.Uri | undefined => {
     const raw = vscode.workspace.getConfiguration('freeocd').get<string>('hexFile');
-    if (!raw) {
-      return undefined;
-    }
-    if (raw.startsWith('/') || /^[a-zA-Z]:[\\/]/u.test(raw)) {
-      return vscode.Uri.file(raw);
-    }
-    const folder = vscode.workspace.workspaceFolders?.[0];
-    return folder ? vscode.Uri.joinPath(folder.uri, raw) : undefined;
+    return raw ? resolveHexUri(raw) : undefined;
   };
 
   // --------------------------------------------------------------------------

@@ -16,6 +16,7 @@
  */
 
 import type { TargetDefinition } from '../common/types';
+import type { DapAdi } from '../dap/dapjs-types';
 
 /** Progress callback invoked with a 0-100 percentage. */
 export type ProgressCallback = (percent: number, message?: string) => void;
@@ -37,11 +38,11 @@ export abstract class PlatformHandler {
   }
 
   /** Mass erase / unlock via platform-specific access port (e.g. CTRL-AP). */
-  public abstract recover(dap: unknown, onProgress: ProgressCallback, token: Cancellable): Promise<unknown>;
+  public abstract recover(dap: DapAdi, onProgress: ProgressCallback, token: Cancellable): Promise<void>;
 
   /** Program `firmware` to the device starting at `startAddress`. */
   public abstract flash(
-    dap: unknown,
+    dap: DapAdi,
     firmware: Uint8Array,
     startAddress: number,
     onProgress: ProgressCallback,
@@ -50,7 +51,7 @@ export abstract class PlatformHandler {
 
   /** Read back `firmware` and compare. */
   public abstract verify(
-    dap: unknown,
+    dap: DapAdi,
     firmware: Uint8Array,
     startAddress: number,
     onProgress: ProgressCallback,
@@ -58,5 +59,5 @@ export abstract class PlatformHandler {
   ): Promise<{ success: boolean; mismatches: number }>;
 
   /** Reset the target (SYSRESETREQ / CTRL-AP reset / etc.). */
-  public abstract reset(dap: unknown): Promise<void>;
+  public abstract reset(dap: DapAdi): Promise<void>;
 }

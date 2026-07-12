@@ -20,12 +20,13 @@ import type { ConnectionInfo, ProbeInfo } from '../common/types';
 import { NotConnectedError, FreeOcdError } from '../common/errors';
 import { log } from '../common/logger';
 import { loadDapjs } from '../common/dapjs-loader';
+import type { CmsisDapProxy, DapAdi } from '../dap/dapjs-types';
 
 export interface Dap {
   /** DAPjs `CmsisDAP` / proxy instance. */
-  proxy: unknown;
+  proxy: CmsisDapProxy;
   /** DAPjs `ADI` instance (provides readMem32 / writeMem32 / etc.). */
-  adi: unknown;
+  adi: DapAdi;
 }
 
 /**
@@ -113,15 +114,13 @@ export class ConnectionManager extends EventEmitter {
       // distributed as UMD; we access it through the `out/dap.umd.js` file
       // that `webpack` copies from `vendor/dapjs/dist/`.
       const dapjs = loadDapjs();
-      const proxy = new dapjs.CmsisDAP(transport, 0) as { connect: () => Promise<void> };
+      const proxy = new dapjs.CmsisDAP(transport, 0);
       // Wrap the CmsisDAP proxy so ADI (and anything derived from it) shares
       // the same connection. Passing `transport` here would cause ADI to
       // construct its own unconnected CmsisDAP internally.
       // ADI accepts either a raw transport or a wrapping CmsisDAP proxy;
       // the `DapjsModule` type declares this union so we don't need a cast.
-      const adi = new dapjs.ADI(proxy as object) as {
-        connect: () => Promise<void>;
-      };
+      const adi = new dapjs.ADI(proxy);
       // ADI.connect() performs CmsisDAP.connect() + DP power-up
       // (CSYSPWRUPREQ / CDBGPWRUPREQ). Without the power-up step, raw
       // DAP_Transfer operations to DP/AP will be silently dropped by the
@@ -147,13 +146,10 @@ export class ConnectionManager extends EventEmitter {
   public async disconnect(): Promise<void> {
     try {
       if (this.dap) {
-        const proxy = this.dap.proxy as { disconnect?: () => Promise<void> };
-        if (typeof proxy.disconnect === 'function') {
-          try {
-            await proxy.disconnect();
-          } catch (err) {
-            log.warn(`Proxy disconnect warning: ${(err as Error).message}`);
-          }
+        try {
+          await this.dap.proxy.disconnect();
+        } catch (err) {
+          log.warn(`Proxy disconnect warning: ${(err as Error).message}`);
         }
       }
       if (this.transport) {
