@@ -223,9 +223,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     flasher,
     sessionLog,
     getRtt: () => rttSession.getHandler(),
-    setRtt: (h) => {
-      rttSession.setHandler(h);
-    },
     connectRtt: (opts) => rttSession.connect(opts),
     disconnectRtt: () => rttSession.teardown('MCP rtt_disconnect'),
     autoFlash,

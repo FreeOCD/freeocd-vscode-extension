@@ -41,7 +41,6 @@ export interface McpToolContext {
   flasher: Flasher;
   sessionLog: SessionLog;
   getRtt(): RttHandler | undefined;
-  setRtt(handler: RttHandler | undefined): void;
   /**
    * Full RTT connect flow — acquires the shared RTT lock, issues the
    * soft-reset + halt sequence mirrored from `freeocd-web`, scans for the

@@ -48,10 +48,6 @@ export class RttSession {
     return this.handler;
   }
 
-  public setHandler(handler: RttHandler | undefined): void {
-    this.handler = handler;
-  }
-
   public isConnected(): boolean {
     return this.handler !== undefined;
   }
@@ -166,6 +162,33 @@ export class RttSession {
    * in a `finally` block.
    */
   public async teardown(reason?: string): Promise<void> {
+    this.releaseResources();
+    this.deps.onSessionChanged();
+    if (reason) {
+      log.info(`RTT torn down: ${reason}`);
+    }
+  }
+
+  /** (Re)open the RTT pseudoterminal for the current handler. */
+  public openTerminal(pollingIntervalMs: number): void {
+    if (!this.handler) {
+      return;
+    }
+    this.terminal?.dispose();
+    this.terminal = new RttTerminal(this.handler, pollingIntervalMs);
+    this.terminal.show();
+  }
+
+  /**
+   * Extension-shutdown cleanup. Releases the same resources as `teardown()`
+   * but skips the `onSessionChanged` callback because the UI providers it
+   * refreshes may already be disposed.
+   */
+  public dispose(): void {
+    this.releaseResources();
+  }
+
+  private releaseResources(): void {
     const { stateManager, operationLock } = this.deps;
     // Always stop the poll loop first — continuing to issue DAP transfers
     // while we're disposing the terminal only invites more failures.
@@ -188,23 +211,5 @@ export class RttSession {
       this.handler = undefined;
     }
     operationLock.release('RTT');
-    this.deps.onSessionChanged();
-    if (reason) {
-      log.info(`RTT torn down: ${reason}`);
-    }
-  }
-
-  /** (Re)open the RTT pseudoterminal for the current handler. */
-  public openTerminal(pollingIntervalMs: number): void {
-    if (!this.handler) {
-      return;
-    }
-    this.terminal?.dispose();
-    this.terminal = new RttTerminal(this.handler, pollingIntervalMs);
-    this.terminal.show();
-  }
-
-  public dispose(): void {
-    this.terminal?.dispose();
   }
 }
