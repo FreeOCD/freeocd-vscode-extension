@@ -20,6 +20,7 @@
 
 import { FreeOcdError } from './errors';
 import type { DapjsTransport } from '../transport/transport-interface';
+import type { CmsisDapProxy, CortexMProcessor, DapAdi } from '../dap/dapjs-types';
 // `DapjsTransport` is referenced for `CmsisDAP` construction; `ADI` accepts
 // either a raw transport or a `CmsisDAP` proxy — we model that union below.
 
@@ -29,7 +30,7 @@ import type { DapjsTransport } from '../transport/transport-interface';
 declare const __non_webpack_require__: NodeRequire | undefined;
 
 export interface DapjsModule {
-  CmsisDAP: new (transport: DapjsTransport, mode: number) => unknown;
+  CmsisDAP: new (transport: DapjsTransport, mode: number) => CmsisDapProxy;
   /**
    * `ADI` accepts either a raw `DapjsTransport` or a wrapping `CmsisDAP`
    * proxy (the latter is what `ConnectionManager` passes so DP power-up
@@ -38,8 +39,8 @@ export interface DapjsModule {
    * constructor here to reflect real usage and avoid `as never` casts at
    * the call site.
    */
-  ADI: new (transportOrProxy: DapjsTransport | object) => unknown;
-  CortexM: new (adi: unknown) => unknown;
+  ADI: new (transportOrProxy: DapjsTransport | CmsisDapProxy) => DapAdi;
+  CortexM: new (proxy: CmsisDapProxy) => CortexMProcessor;
   DAPProtocol?: unknown;
 }
 

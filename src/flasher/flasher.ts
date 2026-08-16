@@ -18,10 +18,11 @@ import { FreeOcdError, CancelledError } from '../common/errors';
 import { log } from '../common/logger';
 import type { FlashProgress } from '../common/types';
 import type { OperationLock, OperationType } from '../common/operation-lock';
+import type { DapAdi } from '../dap/dapjs-types';
 
 export interface FlasherDeps {
   /** Return the currently connected DAP handle (throws if not connected). */
-  getDap(): unknown;
+  getDap(): DapAdi;
   /** Return the platform handler for the selected target. */
   getHandler(): PlatformHandler;
   /**

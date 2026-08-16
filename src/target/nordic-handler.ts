@@ -34,6 +34,8 @@ import {
 import { CancelledError, FreeOcdError } from '../common/errors';
 import { log } from '../common/logger';
 import type { TargetDefinition } from '../common/types';
+import type { DapAdi } from '../dap/dapjs-types';
+import type { DapjsTransport } from '../transport/transport-interface';
 
 // CTRL-AP register offsets (common across Nordic nRF series)
 const CTRL_AP_RESET = 0x000;
@@ -41,21 +43,6 @@ const CTRL_AP_ERASEALL = 0x004;
 const CTRL_AP_ERASEALLSTATUS = 0x008;
 const CTRL_AP_ERASEPROTECTSTATUS = 0x00c;
 const CTRL_AP_IDR_REG = 0x0fc;
-
-interface DapInstance {
-  connect(): Promise<void>;
-  disconnect(): Promise<void>;
-  reconnect(): Promise<void>;
-  reset(): Promise<void>;
-  readMem32(addr: number): Promise<number>;
-  writeMem32(addr: number, value: number): Promise<void>;
-  writeBlock(addr: number, values: Uint32Array): Promise<void>;
-  readBlock(addr: number, count: number): Promise<Uint32Array>;
-}
-
-function asDap(dap: unknown): DapInstance {
-  return dap as DapInstance;
-}
 
 export class NordicHandler extends PlatformHandler {
   private readonly ctrlApNum: number;
@@ -77,14 +64,13 @@ export class NordicHandler extends PlatformHandler {
   }
 
   public async recover(
-    dapHandle: unknown,
+    dap: DapAdi,
     onProgress: ProgressCallback,
     token: Cancellable
-  ): Promise<unknown> {
-    const dap = asDap(dapHandle);
+  ): Promise<void> {
     log.info('Initializing DAP connection for recovery...');
 
-    const idr = await readAPReg(dap as unknown as object, this.ctrlApNum, CTRL_AP_IDR_REG);
+    const idr = await readAPReg(dap, this.ctrlApNum, CTRL_AP_IDR_REG);
     if (idr === undefined) {
       log.warn('Could not read CTRL-AP IDR; attempting mass erase anyway...');
     } else {
@@ -124,10 +110,10 @@ export class NordicHandler extends PlatformHandler {
 
     await sleep(10);
     log.info('Resetting device...');
-    await writeAPReg(dap as unknown as object, this.ctrlApNum, CTRL_AP_RESET, 2);
+    await writeAPReg(dap, this.ctrlApNum, CTRL_AP_RESET, 2);
     await sleep(10);
-    await writeAPReg(dap as unknown as object, this.ctrlApNum, CTRL_AP_RESET, 0);
-    await writeAPReg(dap as unknown as object, this.ctrlApNum, CTRL_AP_ERASEALL, 0);
+    await writeAPReg(dap, this.ctrlApNum, CTRL_AP_RESET, 0);
+    await writeAPReg(dap, this.ctrlApNum, CTRL_AP_ERASEALL, 0);
 
     log.info('Waiting for device to stabilize...');
     await sleep(500);
@@ -146,21 +132,19 @@ export class NordicHandler extends PlatformHandler {
     await this.verifyRecovery(dap);
     onProgress(100);
     log.info('Mass erase completed successfully!');
-    return dap;
   }
 
   public async flash(
-    dapHandle: unknown,
+    dap: DapAdi,
     firmware: Uint8Array,
     startAddress: number,
     onProgress: ProgressCallback,
     token: Cancellable
   ): Promise<void> {
-    const dap = asDap(dapHandle);
     log.info(`Flashing ${firmware.length} bytes starting at 0x${startAddress.toString(16)}...`);
 
-    const proxy = getProxy(dap as unknown as object);
-    const transport = getTransport(proxy as unknown as object);
+    const proxy = getProxy(dap);
+    const transport = getTransport(proxy);
     if (!transport) {
       throw new FreeOcdError('Could not find transport object in proxy.', 'NO_TRANSPORT');
     }
@@ -251,13 +235,12 @@ export class NordicHandler extends PlatformHandler {
   }
 
   public async verify(
-    dapHandle: unknown,
+    dap: DapAdi,
     firmware: Uint8Array,
     startAddress: number,
     onProgress: ProgressCallback,
     token: Cancellable
   ): Promise<{ success: boolean; mismatches: number }> {
-    const dap = asDap(dapHandle);
     log.info('Verifying firmware (reading back entire image)...');
 
     const verifySize = firmware.length;
@@ -310,13 +293,12 @@ export class NordicHandler extends PlatformHandler {
     return { success: true, mismatches: 0 };
   }
 
-  public async reset(dapHandle: unknown): Promise<void> {
-    const dap = asDap(dapHandle);
+  public async reset(dap: DapAdi): Promise<void> {
     log.info('Resetting device via CTRL-AP...');
     try {
-      await writeAPReg(dap as unknown as object, this.ctrlApNum, CTRL_AP_RESET, 2);
+      await writeAPReg(dap, this.ctrlApNum, CTRL_AP_RESET, 2);
       await sleep(10);
-      await writeAPReg(dap as unknown as object, this.ctrlApNum, CTRL_AP_RESET, 0);
+      await writeAPReg(dap, this.ctrlApNum, CTRL_AP_RESET, 0);
       await sleep(100);
       log.info('Device reset completed');
     } catch (err) {
@@ -333,7 +315,7 @@ export class NordicHandler extends PlatformHandler {
   }
 
   private async attemptEraseAll(
-    dap: DapInstance,
+    dap: DapAdi,
     onProgress: ProgressCallback,
     isRetry: boolean,
     token: Cancellable
@@ -342,18 +324,18 @@ export class NordicHandler extends PlatformHandler {
     const timeout = 300;
 
     log.info(`${prefix}Resetting ERASEALL task...`);
-    await writeAPReg(dap as unknown as object, this.ctrlApNum, CTRL_AP_ERASEALL, 0);
+    await writeAPReg(dap, this.ctrlApNum, CTRL_AP_ERASEALL, 0);
     await sleep(10);
 
     log.info(`${prefix}Triggering mass erase (ERASEALL)...`);
-    await writeAPReg(dap as unknown as object, this.ctrlApNum, CTRL_AP_ERASEALL, 1);
+    await writeAPReg(dap, this.ctrlApNum, CTRL_AP_ERASEALL, 1);
 
     log.info(`${prefix}Waiting for erase to start...`);
     let status: number | undefined;
 
     for (let i = 0; i < timeout; i++) {
       throwIfCancelled(token);
-      status = await readAPReg(dap as unknown as object, this.ctrlApNum, CTRL_AP_ERASEALLSTATUS);
+      status = await readAPReg(dap, this.ctrlApNum, CTRL_AP_ERASEALLSTATUS);
       if (status === undefined) {
         await sleep(100);
         onProgress((i / timeout) * 30);
@@ -387,7 +369,7 @@ export class NordicHandler extends PlatformHandler {
       log.info(`${prefix}Waiting for erase to complete...`);
       for (let i = 0; i < timeout; i++) {
         throwIfCancelled(token);
-        status = await readAPReg(dap as unknown as object, this.ctrlApNum, CTRL_AP_ERASEALLSTATUS);
+        status = await readAPReg(dap, this.ctrlApNum, CTRL_AP_ERASEALLSTATUS);
         if (status === undefined) {
           await sleep(100);
           onProgress(30 + (i / timeout) * 50);
@@ -411,18 +393,14 @@ export class NordicHandler extends PlatformHandler {
     return true;
   }
 
-  private async verifyRecovery(dap: DapInstance): Promise<void> {
+  private async verifyRecovery(dap: DapAdi): Promise<void> {
     log.info('Verifying device accessibility...');
     try {
-      const verifyIdr = await readAPReg(dap as unknown as object, this.ctrlApNum, CTRL_AP_IDR_REG);
+      const verifyIdr = await readAPReg(dap, this.ctrlApNum, CTRL_AP_IDR_REG);
       if (verifyIdr !== undefined) {
         log.info(`Post-erase CTRL-AP IDR: 0x${verifyIdr.toString(16).toUpperCase()}`);
       }
-      const protectStatus = await readAPReg(
-        dap as unknown as object,
-        this.ctrlApNum,
-        CTRL_AP_ERASEPROTECTSTATUS
-      );
+      const protectStatus = await readAPReg(dap, this.ctrlApNum, CTRL_AP_ERASEPROTECTSTATUS);
       if (protectStatus !== undefined) {
         log.info(`ERASEPROTECTSTATUS: ${protectStatus}`);
         if (protectStatus >= 1) {
@@ -432,11 +410,7 @@ export class NordicHandler extends PlatformHandler {
           await sleep(500);
           await dap.reconnect();
           await sleep(200);
-          const retryStatus = await readAPReg(
-            dap as unknown as object,
-            this.ctrlApNum,
-            CTRL_AP_ERASEPROTECTSTATUS
-          );
+          const retryStatus = await readAPReg(dap, this.ctrlApNum, CTRL_AP_ERASEPROTECTSTATUS);
           if (retryStatus !== undefined && retryStatus >= 1) {
             log.info('Device is now unlocked after retry');
           } else {
@@ -450,10 +424,7 @@ export class NordicHandler extends PlatformHandler {
     }
   }
 
-  private async initFlashController(
-    dap: DapInstance,
-    transport: import('../transport/transport-interface').DapjsTransport
-  ): Promise<void> {
+  private async initFlashController(dap: DapAdi, transport: DapjsTransport): Promise<void> {
     const type = this.target.flashController.type;
     const base = parseInt(this.target.flashController.base, 16);
     if (type === 'rramc') {
@@ -465,11 +436,7 @@ export class NordicHandler extends PlatformHandler {
     }
   }
 
-  private async initRRAMC(
-    dap: DapInstance,
-    transport: import('../transport/transport-interface').DapjsTransport,
-    base: number
-  ): Promise<void> {
+  private async initRRAMC(dap: DapAdi, transport: DapjsTransport, base: number): Promise<void> {
     const regs = this.target.flashController.registers;
     const configOffset = parseInt(regs.config.offset, 16);
     const configValue = parseInt(regs.config.enableValue ?? '0x101', 16);
@@ -526,11 +493,7 @@ export class NordicHandler extends PlatformHandler {
     }
   }
 
-  private async initNVMC(
-    dap: DapInstance,
-    transport: import('../transport/transport-interface').DapjsTransport,
-    base: number
-  ): Promise<void> {
+  private async initNVMC(dap: DapAdi, transport: DapjsTransport, base: number): Promise<void> {
     const NVMC_CONFIG = base + 0x504;
     const NVMC_READY = base + 0x400;
     const NVMC_CONFIG_WEN = 1;
