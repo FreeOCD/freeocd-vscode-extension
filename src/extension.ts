@@ -20,13 +20,10 @@
 import * as vscode from 'vscode';
 
 import { log, initLogger } from './common/logger';
-import { formatError } from './common/logger';
-import { FreeOcdError, NotConnectedError, NoTargetError } from './common/errors';
-import { loadDapjs } from './common/dapjs-loader';
 import { OperationLock } from './common/operation-lock';
 import { StateManager } from './common/state-manager';
 import { resolveHexUri } from './common/hex-path';
-import type { FlashProgress, TargetDefinition } from './common/types';
+import type { FlashProgress } from './common/types';
 
 import { HidBackend, initProbeFilters } from './transport/hid-transport';
 import { registerTransport } from './transport/transport-registry';
@@ -34,15 +31,16 @@ import { ConnectionManager } from './connection/connection-manager';
 import { TargetManager } from './target/target-manager';
 import { Flasher } from './flasher/flasher';
 import { AutoFlashWatcher } from './flasher/auto-flash-watcher';
-import type { RttHandler } from './rtt/rtt-handler';
-import { RttTerminal } from './rtt/rtt-terminal';
+import { RttSession } from './rtt/rtt-session';
 
 import { SessionLog } from './mcp/session-log';
 import { McpBridge } from './mcp/mcp-bridge';
 import { dispatchMcpTool, type McpToolContext } from './mcp/tool-handlers';
-import { registerMcpProvider, buildMcpConfigPayload } from './mcp/mcp-provider';
+import { registerMcpProvider } from './mcp/mcp-provider';
 
 import { StatusManager } from './ui/status';
+import { StatusCoordinator } from './ui/status-coordinator';
+import { registerCommands } from './commands/register-commands';
 import {
   ConnectionTreeProvider,
   TargetTreeProvider,
@@ -117,49 +115,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // --------------------------------------------------------------------------
   // RTT
   // --------------------------------------------------------------------------
-  let rttHandler: RttHandler | undefined;
-  let rttTerminal: RttTerminal | undefined;
-
-  /**
-   * Tear down the RTT session and release the shared RTT lock.
-   *
-   * Used as:
-   *   1. the body of `freeocd.disconnectRtt`,
-   *   2. the pre-flash/recover cleanup hook (see `onBeforeOperation` below), and
-   *   3. the StateManager `onConnectionLost` callback (probe went away).
-   *
-   * Safe to call when RTT is already disconnected. Swallows errors from
-   * the underlying RTT reset so callers can always run it unconditionally
-   * in a `finally` block.
-   */
-  async function teardownRtt(reason?: string): Promise<void> {
-    // Always stop the poll loop first — continuing to issue DAP transfers
-    // while we're disposing the terminal only invites more failures.
-    stateManager.stopPolling();
-    stateManager.attachProcessor(null);
-    if (rttTerminal) {
-      try {
-        rttTerminal.dispose();
-      } catch (err) {
-        log.warn(`RTT terminal dispose error: ${(err as Error).message}`);
-      }
-      rttTerminal = undefined;
+  const rttSession = new RttSession({
+    connection,
+    targets,
+    operationLock,
+    stateManager,
+    onSessionChanged: () => {
+      debuggerTree.refresh();
+      publishStatus();
     }
-    if (rttHandler) {
-      try {
-        rttHandler.reset();
-      } catch (err) {
-        log.warn(`RTT handler reset error: ${(err as Error).message}`);
-      }
-      rttHandler = undefined;
-    }
-    operationLock.release('RTT');
-    debuggerTree.refresh();
-    publishStatus();
-    if (reason) {
-      log.info(`RTT torn down: ${reason}`);
-    }
-  }
+  });
 
   stateManager.setCallbacks({
     onConnectionLost: async (err) => {
@@ -167,102 +132,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       vscode.window.showWarningMessage(
         vscode.l10n.t('RTT disconnected: {0}', err.message)
       );
-      await teardownRtt('connection lost');
+      await rttSession.teardown('connection lost');
     }
   });
-
-  /**
-   * Shared RTT connect flow used by both `freeocd.connectRtt` (UI command)
-   * and MCP tool handlers (`rtt_connect`). Mirrors `freeocd-web`'s
-   * `connectRtt()`:
-   *
-   *   1. Acquire the shared `RTT` slot of the operation lock (so Flash /
-   *      Recover triggered concurrently from MCP or Tasks gets
-   *      OPERATION_BUSY instead of racing on the transport).
-   *   2. Soft-reset + halt the target to guarantee the RTT control block
-   *      is in a clean state before we scan for it.
-   *   3. Scan for the SEGGER RTT signature.
-   *   4. Resume the target so firmware can actually produce RTT traffic.
-   *   5. Attach the Cortex-M handle to the `StateManager` poll loop so a
-   *      probe disappearance automatically tears the session down.
-   *
-   * Returns the handler on success or `null` when the scan finds no
-   * control block. Throws `OPERATION_BUSY` on lock conflict and propagates
-   * any DAP transfer error from the underlying `RttHandler.init()` /
-   * `softReset` / `halt` calls.
-   */
-  async function connectRttCore(options?: {
-    scanStart?: number;
-    scanRange?: number;
-  }): Promise<RttHandler | null> {
-    if (!connection.isConnected()) {
-      throw new NotConnectedError();
-    }
-    if (!targets.getCurrent()) {
-      throw new NoTargetError();
-    }
-    if (!operationLock.tryAcquire('RTT', 'connectRttCore')) {
-      const held = operationLock.getCurrent();
-      throw new FreeOcdError(
-        `Cannot connect RTT: ${held ?? 'another'} operation is already in progress.`,
-        'OPERATION_BUSY'
-      );
-    }
-
-    let lockOwned = true;
-    try {
-      const config = vscode.workspace.getConfiguration('freeocd');
-      const { RttHandler } = await import('./rtt/rtt-handler');
-      const dapjs = loadDapjs();
-      const processor = new dapjs.CortexM(connection.getDap().proxy);
-
-      log.info('RTT: issuing soft reset + halt to clean up target state...');
-      try {
-        await processor.softReset();
-        await new Promise((r) => setTimeout(r, 1000));
-        await processor.halt();
-      } catch (err) {
-        // Non-fatal: some targets (already-halted, locked, or in a
-        // transient reset state) may reject one of these. Continue and
-        // let the subsequent scan decide.
-        log.warn(`RTT pre-init reset warning: ${(err as Error).message}`);
-      }
-
-      const scanStart =
-        options?.scanStart ?? parseInt(config.get<string>('rtt.scanStart', '0x20000000'), 16);
-      const scanRange =
-        options?.scanRange ?? parseInt(config.get<string>('rtt.scanRange', '0x10000'), 16);
-      const handler = new RttHandler(processor, {
-        scanStartAddress: scanStart,
-        scanRange
-      });
-      const count = await handler.init();
-      if (count < 0) {
-        return null;
-      }
-
-      try {
-        await processor.resume();
-      } catch (err) {
-        log.warn(`RTT resume warning: ${(err as Error).message}`);
-      }
-
-      rttHandler = handler;
-      stateManager.attachProcessor(processor);
-      stateManager.startPolling();
-      // Session now owns the RTT lock for its entire lifetime; only
-      // `teardownRtt()` will release it. Flip the flag so the `finally`
-      // block below skips its cleanup path.
-      lockOwned = false;
-      debuggerTree.refresh();
-      publishStatus();
-      return handler;
-    } finally {
-      if (lockOwned) {
-        operationLock.release('RTT');
-      }
-    }
-  }
 
   // --------------------------------------------------------------------------
   // Flasher + auto-flash
@@ -285,10 +157,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       // iteration and skip).
       stateManager.setExternalOperationInProgress(true);
       stateManager.stopPolling();
-      rttWasConnectedBeforeOperation = rttHandler !== undefined;
+      rttWasConnectedBeforeOperation = rttSession.isConnected();
       if (rttWasConnectedBeforeOperation) {
         log.info(`${op}: RTT is connected, disconnecting for the operation...`);
-        await teardownRtt(`preparing for ${op}`);
+        await rttSession.teardown(`preparing for ${op}`);
       }
     },
     onAfterOperation: async () => {
@@ -350,12 +222,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     targets,
     flasher,
     sessionLog,
-    getRtt: () => rttHandler,
-    setRtt: (h) => {
-      rttHandler = h;
-    },
-    connectRtt: (opts) => connectRttCore(opts),
-    disconnectRtt: () => teardownRtt('MCP rtt_disconnect'),
+    getRtt: () => rttSession.getHandler(),
+    connectRtt: (opts) => rttSession.connect(opts),
+    disconnectRtt: () => rttSession.teardown('MCP rtt_disconnect'),
     autoFlash,
     flashProgress
   };
@@ -421,11 +290,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   });
   const debuggerTree = new DebuggerTreeProvider({
-    state: () =>
-      rttHandler?.getState() ?? { connected: false, numBufUp: 0, numBufDown: 0 }
+    state: () => rttSession.getState()
   });
-  let mcpSummary = '';
-  const mcpStatusTree = new McpStatusTreeProvider({ lastSummary: () => mcpSummary });
+  const mcpStatusTree = new McpStatusTreeProvider({
+    lastSummary: () => statusCoordinator.getSummary()
+  });
+
+  const statusCoordinator = new StatusCoordinator({
+    connection,
+    targets,
+    bridge,
+    sessionLog,
+    hexUri: hexUriFromConfig,
+    rttState: () => rttSession.getState(),
+    onPublished: () => mcpStatusTree.refresh()
+  });
+
+  function publishStatus(): void {
+    statusCoordinator.publish();
+  }
 
   const connectionView = vscode.window.createTreeView('freeocd-connection', {
     treeDataProvider: connectionTree
@@ -458,284 +341,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // --------------------------------------------------------------------------
   // Commands
   // --------------------------------------------------------------------------
-  context.subscriptions.push(
-    vscode.commands.registerCommand('freeocd.connectProbe', async () => {
-      if (!backend) {
-        vscode.window.showErrorMessage(
-          vscode.l10n.t(
-            'node-hid native binding is unavailable. Re-install the extension or check your platform-specific VSIX.'
-          )
-        );
-        return;
-      }
-      try {
-        const probes = await connection.listProbes();
-        if (probes.length === 0) {
-          vscode.window.showWarningMessage(vscode.l10n.t('No CMSIS-DAP probes detected.'));
-          return;
-        }
-        const picks = probes.map((p) => ({
-          label: p.product ?? `VID:0x${p.vendorId.toString(16)}`,
-          description: p.serialNumber ?? p.path,
-          probe: p
-        }));
-        const picked = await vscode.window.showQuickPick(picks, {
-          placeHolder: vscode.l10n.t('Select a CMSIS-DAP probe')
-        });
-        if (!picked) {
-          return;
-        }
-        await vscode.window.withProgress(
-          {
-            location: vscode.ProgressLocation.Notification,
-            title: vscode.l10n.t('Connecting to probe...')
-          },
-          async () => connection.connect(picked.probe)
-        );
-      } catch (err) {
-        handleError(err);
-      }
-    }),
-
-    vscode.commands.registerCommand('freeocd.disconnectProbe', async () => {
-      try {
-        await connection.disconnect();
-        vscode.window.showInformationMessage(vscode.l10n.t('Disconnected from probe'));
-      } catch (err) {
-        handleError(err);
-      }
-    }),
-
-    vscode.commands.registerCommand('freeocd.refreshProbes', async () => {
-      connectionTree.refresh();
-    }),
-
-    vscode.commands.registerCommand('freeocd.selectTargetMcu', async () => {
-      try {
-        const all = targets.list();
-        if (all.length === 0) {
-          await targets.reload();
-        }
-        const picks = targets.list().map((t) => ({
-          label: t.name,
-          description: t.id,
-          detail: `${t.platform} · ${t.cpu}`,
-          target: t
-        }));
-        const picked = await vscode.window.showQuickPick(picks, {
-          placeHolder: vscode.l10n.t('Select a target MCU')
-        });
-        if (!picked) {
-          return;
-        }
-        targets.select(picked.target.id);
-        await vscode.workspace
-          .getConfiguration('freeocd')
-          .update('target.mcu', picked.target.id, true);
-      } catch (err) {
-        handleError(err);
-      }
-    }),
-
-    vscode.commands.registerCommand('freeocd.importTargetDefinition', async () => {
-      try {
-        const picked = await vscode.window.showOpenDialog({
-          canSelectMany: false,
-          filters: { JSON: ['json'] },
-          openLabel: vscode.l10n.t('Import Target Definition')
-        });
-        if (!picked || picked.length === 0) {
-          return;
-        }
-        const def = await targets.import(picked[0]);
-        vscode.window.showInformationMessage(
-          vscode.l10n.t('Imported target: {0}', def.id)
-        );
-      } catch (err) {
-        handleError(err);
-      }
-    }),
-
-    vscode.commands.registerCommand(
-      'freeocd.selectHexFile',
-      async (resource?: vscode.Uri) => {
-        try {
-          let uri = resource;
-          if (!uri) {
-            const picked = await vscode.window.showOpenDialog({
-              canSelectMany: false,
-              filters: { [vscode.l10n.t('Intel HEX files')]: ['hex'] },
-              openLabel: vscode.l10n.t('Select a .hex file')
-            });
-            uri = picked?.[0];
-          }
-          if (!uri) {
-            return;
-          }
-          await vscode.workspace
-            .getConfiguration('freeocd')
-            .update('hexFile', vscode.workspace.asRelativePath(uri, false), true);
-          hexDecoration.setSelected(uri);
-          flasherTree.refresh();
-          if (
-            vscode.workspace.getConfiguration('freeocd').get<boolean>('autoFlash.enabled', false)
-          ) {
-            await autoFlash.update(uri);
-          }
-          publishStatus();
-        } catch (err) {
-          handleError(err);
-        }
-      }
-    ),
-
-    vscode.commands.registerCommand('freeocd.flash', async () => {
-      try {
-        const uri = hexUriFromConfig();
-        if (!uri) {
-          vscode.window.showWarningMessage(vscode.l10n.t('Select a .hex file first.'));
-          return;
-        }
-        const verify = vscode.workspace
-          .getConfiguration('freeocd')
-          .get<boolean>('flash.verifyAfterFlash', true);
-        await flasher.flash(uri, { verifyAfterFlash: verify });
-      } catch (err) {
-        handleError(err);
-      }
-    }),
-
-    vscode.commands.registerCommand('freeocd.verify', async () => {
-      try {
-        const uri = hexUriFromConfig();
-        if (!uri) {
-          vscode.window.showWarningMessage(vscode.l10n.t('Select a .hex file first.'));
-          return;
-        }
-        await flasher.verify(uri);
-      } catch (err) {
-        handleError(err);
-      }
-    }),
-
-    vscode.commands.registerCommand('freeocd.recover', async () => {
-      try {
-        await flasher.recover();
-      } catch (err) {
-        handleError(err);
-      }
-    }),
-
-    vscode.commands.registerCommand('freeocd.softReset', async () => {
-      try {
-        await flasher.softReset();
-      } catch (err) {
-        handleError(err);
-      }
-    }),
-
-    vscode.commands.registerCommand('freeocd.toggleAutoFlash', async () => {
-      const config = vscode.workspace.getConfiguration('freeocd');
-      const current = config.get<boolean>('autoFlash.enabled', false);
-      await config.update('autoFlash.enabled', !current, true);
-      const uri = hexUriFromConfig();
-      if (!current && uri) {
-        await autoFlash.update(uri);
-        vscode.window.showInformationMessage(
-          vscode.l10n.t('Auto-flash enabled for {0}', vscode.workspace.asRelativePath(uri))
-        );
-      } else {
-        await autoFlash.update(undefined);
-        vscode.window.showInformationMessage(vscode.l10n.t('Auto-flash disabled.'));
-      }
-      flasherTree.refresh();
-    }),
-
-    vscode.commands.registerCommand('freeocd.connectRtt', async () => {
-      try {
-        const handler = await connectRttCore();
-        if (!handler) {
-          vscode.window.showWarningMessage(
-            vscode.l10n.t('RTT control block not found in scan range.')
-          );
-          return;
-        }
-        const state = handler.getState();
-        vscode.window.showInformationMessage(
-          vscode.l10n.t(
-            'RTT connected ({0} up, {1} down buffers).',
-            state.numBufUp,
-            state.numBufDown
-          )
-        );
-        const config = vscode.workspace.getConfiguration('freeocd');
-        if (config.get<boolean>('rtt.autoOpenTerminal', true)) {
-          await vscode.commands.executeCommand('freeocd.openRttTerminal');
-        }
-      } catch (err) {
-        handleError(err);
-      }
-    }),
-
-    vscode.commands.registerCommand('freeocd.disconnectRtt', async () => {
-      await teardownRtt('user requested disconnect');
-      vscode.window.showInformationMessage(vscode.l10n.t('RTT disconnected.'));
-    }),
-
-    vscode.commands.registerCommand('freeocd.openRttTerminal', async () => {
-      try {
-        if (!rttHandler) {
-          await vscode.commands.executeCommand('freeocd.connectRtt');
-        }
-        if (!rttHandler) {
-          return;
-        }
-        const interval = vscode.workspace
-          .getConfiguration('freeocd')
-          .get<number>('rtt.pollingInterval', 100);
-        rttTerminal?.dispose();
-        rttTerminal = new RttTerminal(rttHandler, interval);
-        rttTerminal.show();
-      } catch (err) {
-        handleError(err);
-      }
-    }),
-
-    vscode.commands.registerCommand('freeocd.setupMcp', async () => {
-      const payload = buildMcpConfigPayload({
-        serverJs: vscode.Uri.joinPath(context.extensionUri, 'out', 'mcp-server.js').fsPath,
-        extensionDir: context.extensionUri.fsPath,
-        ipcDir: ipcDir.fsPath
-      });
-      const text = JSON.stringify(
-        {
-          'Windsurf (~/.codeium/windsurf/mcp_config.json)': payload.windsurf,
-          'Cursor (~/.cursor/mcp.json)': payload.cursor,
-          'Cline (~/.cline/cline_mcp_settings.json)': payload.cline
-        },
-        null,
-        2
-      );
-      await vscode.env.clipboard.writeText(text);
-      vscode.window.showInformationMessage(
-        vscode.l10n.t(
-          'MCP configuration copied to clipboard. Paste it into your IDE\'s MCP settings.'
-        )
-      );
-    }),
-
-    vscode.commands.registerCommand('freeocd.openStorageFolder', async () => {
-      if (!context.storageUri) {
-        return;
-      }
-      await vscode.commands.executeCommand('revealFileInOS', context.storageUri);
-    }),
-
-    vscode.commands.registerCommand('freeocd.showLog', async () => {
-      vscode.commands.executeCommand('workbench.action.output.toggleOutput');
-      log.info('FreeOCD log opened via command.');
-    })
-  );
+  registerCommands(context, {
+    hasHidBackend: backend !== undefined,
+    connection,
+    targets,
+    flasher,
+    autoFlash,
+    rttSession,
+    hexDecoration,
+    hexUriFromConfig,
+    refreshConnectionTree: () => connectionTree.refresh(),
+    refreshFlasherTree: () => flasherTree.refresh(),
+    publishStatus,
+    mcpPaths: {
+      serverJs: vscode.Uri.joinPath(context.extensionUri, 'out', 'mcp-server.js').fsPath,
+      extensionDir: context.extensionUri.fsPath,
+      ipcDir: ipcDir.fsPath
+    }
+  });
 
   // --------------------------------------------------------------------------
   // Walkthrough on first activation
@@ -788,7 +411,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     { dispose: () => mcpStatusTree.dispose() },
     { dispose: () => hexDecoration.dispose() },
     { dispose: () => bridge.dispose() },
-    { dispose: () => rttTerminal?.dispose() },
+    { dispose: () => rttSession.dispose() },
     { dispose: () => stateManager.dispose() },
     { dispose: () => operationLock.dispose() }
   );
@@ -798,56 +421,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // warnings. This fires for both user-initiated disconnects
   // (`freeocd.disconnectProbe`) and error-induced transitions.
   connection.on('stateChanged', (info) => {
-    if (info.state !== 'connected' && rttHandler) {
-      void teardownRtt(`probe state -> ${info.state}`);
+    if (info.state !== 'connected' && rttSession.isConnected()) {
+      void rttSession.teardown(`probe state -> ${info.state}`);
     }
   });
 
   publishStatus();
   log.info('FreeOCD extension activation complete.');
-
-  // --------------------------------------------------------------------------
-  // Helpers (closures)
-  // --------------------------------------------------------------------------
-  function handleError(err: unknown): void {
-    if (err instanceof FreeOcdError) {
-      vscode.window.showErrorMessage(err.message);
-    } else {
-      vscode.window.showErrorMessage(formatError(err).split('\n')[0]);
-    }
-    log.error(err as Error);
-  }
-
-  function publishStatus(): void {
-    const info = connection.getInfo();
-    const target = targets.getCurrent();
-    const hexUri = hexUriFromConfig();
-    const rtt = rttHandler?.getState() ?? { connected: false, numBufUp: 0, numBufDown: 0 };
-    bridge.publishStatus({
-      connection: {
-        state: info.state,
-        method: info.method,
-        probe: info.probe
-          ? {
-              vendorId: info.probe.vendorId,
-              productId: info.probe.productId,
-              serialNumber: info.probe.serialNumber,
-              product: info.probe.product
-            }
-          : undefined
-      },
-      target: target
-        ? { id: target.id, name: target.name, platform: target.platform }
-        : undefined,
-      hexFile: hexUri?.fsPath,
-      flash: { inProgress: false },
-      rtt,
-      lastError: sessionLog.lastError()?.error,
-      timestamp: new Date().toISOString()
-    });
-    mcpSummary = describeSummary(info, target);
-    mcpStatusTree.refresh();
-  }
 }
 
 async function maybeShowWalkthrough(context: vscode.ExtensionContext): Promise<void> {
@@ -866,14 +446,6 @@ async function maybeShowWalkthrough(context: vscode.ExtensionContext): Promise<v
   }
 }
 
-function describeSummary(
-  info: { state: string; probe?: { product?: string } },
-  target: TargetDefinition | undefined
-): string {
-  const probe = info.probe?.product ?? info.state;
-  const t = target ? target.name : 'no target';
-  return `${probe} / ${t}`;
-}
 
 export function deactivate(): void {
   log.info('FreeOCD extension deactivating.');
