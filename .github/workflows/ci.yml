@@ -33,8 +33,8 @@ jobs:
         run: npm ci
       - name: ESLint
         run: npm run lint
-      - name: TypeScript typecheck
-        run: npx tsc --noEmit -p .
+      - name: TypeScript typecheck (TypeScript 7)
+        run: npm run typecheck
       - name: Validate target JSON files
         run: npm run lint:targets
 
