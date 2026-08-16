@@ -478,7 +478,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@vscode/l10n": "^0.0.18",
-    "node-hid": "^3.3.0",
+    "node-hid": "^3.4.0",
     "zod": "^4.4.3",
     "zod-to-json-schema": "^3.25.2"
   },
