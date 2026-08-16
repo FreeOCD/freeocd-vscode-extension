@@ -476,7 +476,7 @@
     "webpack-cli": "^7.2.1"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@vscode/l10n": "^0.0.18",
     "node-hid": "^3.4.0",
     "zod": "^4.4.3",
