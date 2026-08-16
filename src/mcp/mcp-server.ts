@@ -26,16 +26,21 @@ import type { ZodType } from 'zod/v3';
 // JSON Schema Draft 2020-12 documents that ship in every `tools/list`
 // response. Already pulled in transitively by `@modelcontextprotocol/sdk`
 // but declared directly in our package.json to lock the contract.
+import { pathToFileURL } from 'url';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
+  CompleteRequestSchema,
   ListToolsRequestSchema,
   ListPromptsRequestSchema,
   GetPromptRequestSchema,
   ListResourcesRequestSchema,
-  ReadResourceRequestSchema
+  ListResourceTemplatesRequestSchema,
+  ReadResourceRequestSchema,
+  SubscribeRequestSchema,
+  UnsubscribeRequestSchema
 } from '@modelcontextprotocol/sdk/types.js';
 
 import { ALL_TOOLS } from './tools';
@@ -48,6 +53,7 @@ import { dispatchAiTool } from './ai-handlers';
 declare const EXTENSION_VERSION: string;
 
 const IPC_DIR = process.env.FREEOCD_IPC_DIR;
+const EXTENSION_DIR = process.env.FREEOCD_EXTENSION_DIR;
 const REQUEST_TIMEOUT_MS = Number(process.env.FREEOCD_REQUEST_TIMEOUT_MS ?? '120000');
 
 if (!IPC_DIR) {
@@ -67,6 +73,17 @@ function requestFileFor(requestId: string): string {
 function responseFileFor(requestId: string): string {
   return path.join(IPC_DIR!, `response-${requestId}.json`);
 }
+
+/** URI of the live status resource (mirrors `status.json` in the IPC dir). */
+const STATUS_RESOURCE_URI = 'freeocd://status';
+/** URI of the dynamic session-log resource. */
+const SESSION_LOG_RESOURCE_URI = 'logs://session-log';
+/** RFC 6570 template for reading a single target definition (ids contain `/`). */
+const TARGET_RESOURCE_TEMPLATE = 'freeocd://targets/{+targetId}';
+const TARGET_RESOURCE_RE = /^freeocd:\/\/targets\/(.+)$/u;
+
+/** Interval between progress heartbeats for long-running forwarded tools. */
+const PROGRESS_INTERVAL_MS = 2000;
 
 const SERVER_INSTRUCTIONS = [
   'FreeOCD exposes every DAP.js capability plus target/flash/RTT/session tools.',
@@ -88,14 +105,24 @@ const SERVER_INSTRUCTIONS = [
   '                       ai_summarize_session / ai_suggest_target_fix)',
   '',
   'AI tools (prefix `ai_`) use MCP sampling to delegate reasoning back to your',
-  'host LLM. The first call will prompt you to authorize model access.'
+  'host LLM. The first call will prompt you to authorize model access.',
+  '',
+  'Live state is available as resources: `freeocd://status` (probe / target /',
+  'flash / RTT snapshot, supports subscriptions), `logs://session-log`',
+  '(recent tool activity), and `freeocd://targets/{targetId}` (any stored',
+  'target definition).'
 ].join('\n');
 
 async function main(): Promise<void> {
   const server = new Server(
     {
       name: 'freeocd',
-      version: EXTENSION_VERSION
+      title: 'FreeOCD',
+      version: EXTENSION_VERSION,
+      description:
+        'Open-source CMSIS-DAP flashing, RTT, and low-level ARM debug tools for embedded targets.',
+      websiteUrl: 'https://github.com/FreeOCD/freeocd-vscode-extension',
+      icons: serverIcons()
     },
     {
       // `sampling` is a CLIENT capability (the client answers the
@@ -106,13 +133,17 @@ async function main(): Promise<void> {
       capabilities: {
         tools: {},
         prompts: {},
-        resources: {}
+        resources: { subscribe: true },
+        completions: {},
+        logging: {}
       },
       instructions: SERVER_INSTRUCTIONS
     }
   );
 
+  activeServer = server;
   const resources = buildStaticResources();
+  watchStatusFile(server);
 
   // --------------------------------------------------------------------------
   // Tools
@@ -158,7 +189,7 @@ async function main(): Promise<void> {
     })
   }));
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const tool = ALL_TOOLS.find((t) => t.name === request.params.name);
     if (!tool) {
       return toolError(`Unknown tool: ${request.params.name}`);
@@ -171,6 +202,11 @@ async function main(): Promise<void> {
           .join('; ')}`
       );
     }
+    const progressToken = request.params._meta?.progressToken;
+    const stopHeartbeat =
+      progressToken !== undefined
+        ? startProgressHeartbeat(tool.name, progressToken, extra.sendNotification)
+        : undefined;
     try {
       // `serverOnly` tools (the `ai_*` family) run entirely in this process
       // because they drive MCP sampling against the host client. They may
@@ -184,10 +220,18 @@ async function main(): Promise<void> {
           )
         : await forwardRequest(tool.name, parseResult.data);
       return {
-        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }]
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+        // Structured output (MCP 2025-06-18+): clients that understand
+        // `structuredContent` get the raw JSON payload without re-parsing
+        // the text block. Non-object results are wrapped in `{ result }`
+        // because the field must be a JSON object.
+        structuredContent: structuredFor(result)
       };
     } catch (err) {
+      serverLog('warning', `Tool ${tool.name} failed: ${(err as Error).message}`);
       return toolError((err as Error).message);
+    } finally {
+      stopHeartbeat?.();
     }
   });
 
@@ -197,6 +241,7 @@ async function main(): Promise<void> {
   server.setRequestHandler(ListPromptsRequestSchema, async () => ({
     prompts: PROMPTS.map((p) => ({
       name: p.name,
+      title: p.title,
       description: p.description,
       arguments: p.arguments.map((a) => ({
         name: a.name,
@@ -228,19 +273,100 @@ async function main(): Promise<void> {
   // Resources
   // --------------------------------------------------------------------------
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({
-    resources: resources.map((r) => ({
-      uri: r.uri,
-      name: r.name,
-      description: r.description,
-      mimeType: r.mimeType
-    }))
+    resources: [
+      ...resources.map((r) => ({
+        uri: r.uri,
+        name: r.name,
+        description: r.description,
+        mimeType: r.mimeType
+      })),
+      {
+        uri: STATUS_RESOURCE_URI,
+        name: 'Live Probe & Target Status',
+        description:
+          'Real-time snapshot of the probe connection, selected target, flash progress, and RTT state. Supports subscriptions.',
+        mimeType: 'application/json'
+      },
+      {
+        uri: SESSION_LOG_RESOURCE_URI,
+        name: 'Session Log',
+        description: 'Recent FreeOCD tool activity (commands, durations, errors).',
+        mimeType: 'application/json'
+      }
+    ]
   }));
+
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
+    resourceTemplates: [
+      {
+        uriTemplate: TARGET_RESOURCE_TEMPLATE,
+        name: 'Target Definition',
+        description:
+          'Full JSON definition of a stored FreeOCD target (e.g. freeocd://targets/nordic/nrf54/nrf54l15).',
+        mimeType: 'application/json'
+      }
+    ]
+  }));
+
+  // Resource subscriptions (currently only the live status snapshot is
+  // file-backed and change-detectable).
+  server.setRequestHandler(SubscribeRequestSchema, async (request) => {
+    subscribedUris.add(request.params.uri);
+    return {};
+  });
+  server.setRequestHandler(UnsubscribeRequestSchema, async (request) => {
+    subscribedUris.delete(request.params.uri);
+    return {};
+  });
+
+  // Argument completions for resource templates and prompt arguments.
+  server.setRequestHandler(CompleteRequestSchema, async (request) => {
+    const { ref, argument } = request.params;
+    let values: string[] = [];
+    const wantsTargetId =
+      (ref.type === 'ref/resource' && argument.name === 'targetId') ||
+      (ref.type === 'ref/prompt' && argument.name === 'similar_mcu');
+    if (wantsTargetId) {
+      values = await listTargetIds(argument.value);
+    }
+    return {
+      completion: {
+        values: values.slice(0, 100),
+        total: values.length,
+        hasMore: values.length > 100
+      }
+    };
+  });
 
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const res = resources.find((r) => r.uri === request.params.uri);
     if (!res) {
+      if (request.params.uri === STATUS_RESOURCE_URI) {
+        return {
+          contents: [
+            {
+              uri: request.params.uri,
+              mimeType: 'application/json',
+              text: readStatusJson()
+            }
+          ]
+        };
+      }
+      const targetMatch = TARGET_RESOURCE_RE.exec(request.params.uri);
+      if (targetMatch) {
+        const target = await forwardRequest('get_target_info', { id: targetMatch[1] });
+        return {
+          contents: [
+            {
+              uri: request.params.uri,
+              mimeType: 'application/json',
+              text: JSON.stringify(target, null, 2)
+            }
+          ]
+        };
+      }
       // Dynamic resource: logs://session-log
-      if (request.params.uri === 'logs://session-log') {
+      if (request.params.uri === SESSION_LOG_RESOURCE_URI) {
         const log = await forwardRequest('get_session_log', { limit: 200 }).catch(() => []);
         return {
           contents: [
@@ -264,6 +390,16 @@ async function main(): Promise<void> {
   await server.connect(transport);
 }
 
+process.on('uncaughtException', (err) => {
+  console.error('[freeocd-mcp] Uncaught exception:', err);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[freeocd-mcp] Unhandled rejection:', reason);
+  process.exit(1);
+});
+
 main().catch((err) => {
   console.error('[freeocd-mcp] Fatal error:', err);
   process.exit(1);
@@ -272,6 +408,150 @@ main().catch((err) => {
 // ============================================================================
 // Helpers
 // ============================================================================
+
+/** Set once in `main()`; used by `serverLog` after the transport connects. */
+let activeServer: Server | undefined;
+
+/** Resource URIs the client has subscribed to (spec: resources/subscribe). */
+const subscribedUris = new Set<string>();
+
+/**
+ * Send an MCP `notifications/message` log entry to the client (VS Code
+ * surfaces these in the server output channel). Best-effort: never throws.
+ */
+function serverLog(level: 'info' | 'warning' | 'error', message: string): void {
+  activeServer
+    ?.sendLoggingMessage({ level, logger: 'freeocd', data: message })
+    .catch(() => {
+      // Client may not be connected yet or may have gone away — ignore.
+    });
+}
+
+/**
+ * Server icon list (MCP 2025-11-25). Stdio servers may serve icons from the
+ * filesystem via `file://` URIs; we point at the extension's bundled icon.
+ */
+function serverIcons(): Array<{ src: string; mimeType: string }> | undefined {
+  if (!EXTENSION_DIR) {
+    return undefined;
+  }
+  const iconPath = path.join(EXTENSION_DIR, 'out', 'icons', 'freeocd.png');
+  try {
+    if (!fs.existsSync(iconPath)) {
+      return undefined;
+    }
+  } catch {
+    return undefined;
+  }
+  return [{ src: pathToFileURL(iconPath).href, mimeType: 'image/png' }];
+}
+
+/**
+ * Shape a tool result for the `structuredContent` field, which must be a
+ * JSON object. Arrays and primitives are wrapped in `{ result }`.
+ */
+function structuredFor(result: unknown): Record<string, unknown> | undefined {
+  if (result === null || result === undefined) {
+    return undefined;
+  }
+  if (typeof result === 'object' && !Array.isArray(result)) {
+    return result as Record<string, unknown>;
+  }
+  return { result };
+}
+
+/** Read the latest extension-published status snapshot (best-effort). */
+function readStatusJson(): string {
+  try {
+    return fs.readFileSync(STATUS_FILE, 'utf8');
+  } catch {
+    return JSON.stringify(
+      { available: false, reason: 'No status published yet — is the FreeOCD extension active?' },
+      null,
+      2
+    );
+  }
+}
+
+/**
+ * Watch the IPC directory for `status.json` changes and notify subscribers
+ * of the `freeocd://status` resource. Debounced because the extension may
+ * write the file in bursts.
+ */
+function watchStatusFile(server: Server): void {
+  let debounce: ReturnType<typeof setTimeout> | undefined;
+  try {
+    fs.mkdirSync(IPC_DIR!, { recursive: true });
+    fs.watch(IPC_DIR!, (_event, filename) => {
+      // `filename` can be null on some platforms (notably macOS); treat that
+      // as "something in the directory changed" and rely on the debounce.
+      if ((filename !== null && filename !== 'status.json') || !subscribedUris.has(STATUS_RESOURCE_URI)) {
+        return;
+      }
+      if (debounce) {
+        clearTimeout(debounce);
+      }
+      debounce = setTimeout(() => {
+        server.sendResourceUpdated({ uri: STATUS_RESOURCE_URI }).catch(() => {
+          // Client disconnected — ignore.
+        });
+      }, 250);
+    });
+  } catch (err) {
+    console.error('[freeocd-mcp] Failed to watch status file:', err);
+  }
+}
+
+/** Fetch stored target ids for completions, filtered by prefix. */
+async function listTargetIds(prefix: string): Promise<string[]> {
+  try {
+    const targets = (await forwardRequest('list_targets', {})) as Array<{ id?: unknown }>;
+    return targets
+      .map((t) => String(t.id ?? ''))
+      .filter((id) => id.length > 0 && id.startsWith(prefix));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Emit periodic `notifications/progress` heartbeats while a forwarded tool
+ * call is in flight, so clients (VS Code shows these in the chat progress
+ * UI) know a long flash / verify / recover is still alive. Returns a stop
+ * function the caller must invoke when the call settles.
+ */
+function startProgressHeartbeat(
+  tool: string,
+  progressToken: string | number,
+  sendNotification: (notification: {
+    method: 'notifications/progress';
+    params: { progressToken: string | number; progress: number; message?: string };
+  }) => Promise<void>
+): () => void {
+  let ticks = 0;
+  const timer = setInterval(() => {
+    ticks += 1;
+    let message = `${tool} in progress…`;
+    try {
+      const status = JSON.parse(readStatusJson()) as {
+        flash?: { inProgress?: boolean };
+        rtt?: { connected?: boolean };
+      };
+      if (status.flash?.inProgress) {
+        message = `${tool}: flash operation in progress…`;
+      }
+    } catch {
+      // Status unreadable — keep the generic message.
+    }
+    sendNotification({
+      method: 'notifications/progress',
+      params: { progressToken, progress: ticks, message }
+    }).catch(() => {
+      // Client went away — the interval is cleared by the caller.
+    });
+  }, PROGRESS_INTERVAL_MS);
+  return () => clearInterval(timer);
+}
 
 function toolError(message: string): { isError: true; content: Array<{ type: 'text'; text: string }> } {
   return {
@@ -400,6 +680,3 @@ async function forwardRequest(tool: string, args: unknown): Promise<unknown> {
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
-
-// Suppress "unused STATUS_FILE" — reserved for future status streaming.
-void STATUS_FILE;
