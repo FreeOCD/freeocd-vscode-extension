@@ -24,7 +24,10 @@ updates:
       # The classic `typescript` package must stay on 6.x: @typescript-eslint's
       # peer range is "<6.1.0". TS 7 coverage comes from @typescript/native
       # (tsgo) used by `npm run typecheck`. Re-evaluate when typescript-eslint
-      # declares support for TypeScript 7.
+      # declares support for TypeScript 7. Note: typescript-estree >=8.73 also
+      # declares an optional peer on @typescript/native via a floating
+      # dated-nightly range; package.json overrides pin it to ^7.0.2 so new
+      # nightlies cannot desync the lockfile for `npm ci`.
       - dependency-name: "typescript"
         update-types:
           - "version-update:semver-major"
