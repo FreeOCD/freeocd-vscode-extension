@@ -485,6 +485,9 @@
   "overrides": {
     "copy-webpack-plugin": {
       "serialize-javascript": "^7.1.4"
+    },
+    "@typescript-eslint/typescript-estree": {
+      "@typescript/native": "npm:typescript@^7.0.2"
     }
   }
 }
