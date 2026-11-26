@@ -45,16 +45,26 @@ REQUIRED = (
     "extension/vendor/freeocd-web/LICENSE",
     "extension/node_modules/node-hid/package.json",
     "extension/node_modules/node-hid/nodehid.js",
+    "extension/node_modules/node-hid/binding-options.js",
     "extension/node_modules/pkg-prebuilds/bindings.js",
+    "extension/node_modules/pkg-prebuilds/lib/prebuild.js",
 )
+TARGETS_DIR = "extension/out/targets/"
+EF_ARM_ABI_FLOAT_HARD = 0x400
 
 
 def binary_machine(data, fmt):
-    """Return the machine id of a native binary, or None if the header is invalid."""
+    """Return the machine id of a native binary, or None if the header is invalid.
+
+    32-bit ARM ELF binaries must use the hard-float ABI (linux-armhf).
+    """
     if fmt == "elf":
-        if len(data) < 20 or data[:4] != b"\x7fELF" or data[5] != 1:
+        if len(data) < 52 or data[:4] != b"\x7fELF" or data[5] != 1:
             return None
-        return struct.unpack_from("<H", data, 18)[0]
+        machine = struct.unpack_from("<H", data, 18)[0]
+        if machine == 0x28 and not struct.unpack_from("<I", data, 36)[0] & EF_ARM_ABI_FLOAT_HARD:
+            return None
+        return machine
     if fmt == "macho":
         if len(data) < 8 or data[:4] != b"\xcf\xfa\xed\xfe":
             return None
@@ -110,6 +120,15 @@ def validate(path, version):
                 raise ValueError(f"missing archive member: {member}")
             if archive.getinfo(member).file_size == 0:
                 raise ValueError(f"empty archive member: {member}")
+
+        index = json.loads(archive.read(f"{TARGETS_DIR}index.json"))
+        ids = index.get("targets") if isinstance(index, dict) else None
+        if not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids):
+            raise ValueError("out/targets/index.json has no target list")
+        for target_id in ids:
+            member = f"{TARGETS_DIR}{target_id}.json"
+            if ".." in PurePosixPath(target_id).parts or member not in names:
+                raise ValueError(f"missing MCU definition: {member}")
 
         expected = expected_prebuilds(target)
         shipped = {n for n in names if n.startswith(PREBUILDS) and n.endswith(".node")}

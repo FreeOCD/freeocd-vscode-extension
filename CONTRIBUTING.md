@@ -151,11 +151,13 @@ Whenever you add, rename, or remove an MCP tool:
 
 ## Releasing
 
-1. Bump `version` in `package.json` and add a dated section to
-   `CHANGELOG.md`.
+1. Bump the version in both `package.json` and `package-lock.json`
+   (`npm version X.Y.Z --no-git-tag-version`) and add a dated section to
+   `CHANGELOG.md`. The release workflow rejects a tag that does not match
+   both files or is not in `main` history.
 2. Commit, tag `vX.Y.Z`, and push the tag:
    ```sh
-   git commit -m "chore: release vX.Y.Z"
+   git commit -am "chore: release vX.Y.Z"
    git tag vX.Y.Z
    git push --follow-tags
    ```

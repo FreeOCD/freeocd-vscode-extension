@@ -14,12 +14,14 @@ validate, main, TARGETS, REQUIRED = module["validate"], module["main"], module["
 expected_prebuilds = module["expected_prebuilds"]
 
 
-def native(fmt, machine):
+def native(fmt, machine, hard_float=True):
     if fmt == "elf":
         data = bytearray(64)
         data[:4] = b"\x7fELF"
         data[5] = 1
         struct.pack_into("<H", data, 18, machine)
+        if machine == 0x28 and hard_float:
+            struct.pack_into("<I", data, 36, 0x5000400)
         return bytes(data)
     if fmt == "macho":
         return b"\xcf\xfa\xed\xfe" + struct.pack("<I", machine) + bytes(24)
@@ -54,6 +56,8 @@ class ValidateVsixTest(unittest.TestCase):
                 </PackageManifest>""")
             files = {member: b"x" for member in REQUIRED if member not in skip}
             files["extension/out/extension.js"] = b"x"
+            files["extension/out/targets/index.json"] = json.dumps({"targets": ["nordic/nrf54/nrf54l15"]})
+            files["extension/out/targets/nordic/nrf54/nrf54l15.json"] = b"{}"
             files["extension/package.json"] = json.dumps({
                 "name": "freeocd-extension", "publisher": "FreeOCD",
                 "version": version, "main": "./out/extension.js",
@@ -80,6 +84,22 @@ class ValidateVsixTest(unittest.TestCase):
     def test_rejects_missing_required_file(self):
         with self.assertRaisesRegex(ValueError, "missing archive member: extension/out/dap.umd.js"):
             validate(self.build("linux-x64", skip={"extension/out/dap.umd.js"}), "1.2.3")
+
+    def test_rejects_missing_hid_loader(self):
+        for member in ("extension/node_modules/node-hid/binding-options.js",
+                       "extension/node_modules/pkg-prebuilds/lib/prebuild.js"):
+            with self.subTest(member=member), self.assertRaisesRegex(ValueError, f"missing archive member: {member}"):
+                validate(self.build("linux-x64", skip={member}), "1.2.3")
+
+    def test_rejects_missing_mcu_definition(self):
+        member = "extension/out/targets/nordic/nrf54/nrf54l15.json"
+        with self.assertRaisesRegex(ValueError, f"missing MCU definition: {member}"):
+            validate(self.build("linux-x64", skip={member}), "1.2.3")
+
+    def test_rejects_soft_float_armhf(self):
+        soft = {m: native("elf", 0x28, hard_float=False) for m in expected_prebuilds("linux-armhf")}
+        with self.assertRaisesRegex(ValueError, "invalid native binding for linux-armhf"):
+            validate(self.build("linux-armhf", binaries=soft), "1.2.3")
 
     def test_rejects_wrong_architecture(self):
         wrong = {m: native("elf", TARGETS["linux-x64"][2]) for m in expected_prebuilds("linux-arm64")}
