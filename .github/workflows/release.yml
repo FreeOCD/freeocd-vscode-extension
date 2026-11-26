@@ -3,18 +3,83 @@ name: Release
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:
+  # Dry-run: build and validate all VSIX targets on PRs that touch the release
+  # inputs; only a tag push reaches the publish job.
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - '.github/scripts/**'
+      - '.github/publish-tools/**'
+      - '.vscodeignore*'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'webpack.config.js'
 
 permissions:
   contents: read
 
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  validate:
+    name: Validate tag and release policy
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test VSIX validator
+        run: python3 .github/scripts/test_validate_vsix.py
+      - name: Verify the tag matches package.json and main
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          lock=$(node -p "require('./package-lock.json').packages[''].version")
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ || "$lock" != "$version" ]]; then
+            echo "::error::package.json version '$version' must be MAJOR.MINOR.PATCH and match package-lock.json ('$lock')"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$EVENT_NAME" != "push" ]]; then
+            echo "Dry run for v$version"
+            exit 0
+          fi
+          if [[ "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version v$version"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor HEAD refs/remotes/origin/main; then
+            echo "::error::Tag $GITHUB_REF_NAME must point to a commit in main history"
+            exit 1
+          fi
+      - name: Verify production requires approval and allows only v* tags
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          endpoint="repos/$GITHUB_REPOSITORY/environments/production"
+          gh api "$endpoint" | jq -e '
+            .deployment_branch_policy.custom_branch_policies and
+            any(.protection_rules[]; .type == "required_reviewers" and (.reviewers | length > 0))
+          ' > /dev/null || { echo "::error::production must require a reviewer and use custom deployment policies"; exit 1; }
+          gh api "$endpoint/deployment-branch-policies" | jq -e '
+            any(.branch_policies[]; .name == "v*" and .type == "tag")
+          ' > /dev/null || { echo "::error::production must allow the v* tag deployment policy"; exit 1; }
+
   lint-and-test:
     name: Release gate (lint + Linux test)
+    needs: validate
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
@@ -43,15 +108,6 @@ jobs:
         run: npm run typecheck
       - name: Validate target JSON files
         run: npm run lint:targets
-      - name: Verify tag matches package.json
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          TAG="${GITHUB_REF#refs/tags/v}"
-          PKG=$(node -p "require('./package.json').version")
-          if [ "$TAG" != "$PKG" ]; then
-            echo "Tag v$TAG does not match package.json version $PKG"
-            exit 1
-          fi
       - name: Webpack build
         run: npm run compile
       - name: Run extension tests
@@ -124,15 +180,40 @@ jobs:
         with:
           name: vsix-${{ matrix.target }}
           path: freeocd-extension-${{ matrix.target }}.vsix
+          if-no-files-found: error
+
+  validate-vsix:
+    name: Validate VSIX distribution
+    needs: [validate, build]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download all VSIX artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: vsix
+          pattern: vsix-*
+          merge-multiple: true
+          digest-mismatch: error
+      - name: Validate all seven targets
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: python3 .github/scripts/validate-vsix.py --version "$VERSION" --all vsix
 
   publish:
     name: Publish (Marketplace + Open VSX + GitHub Releases)
-    needs: build
+    needs: [validate, validate-vsix]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     environment: production
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -150,8 +231,15 @@ jobs:
           path: vsix
           pattern: vsix-*
           merge-multiple: true
-      - name: List VSIX files
-        run: ls -la vsix
+          digest-mismatch: error
+      - name: Re-validate VSIX files
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: python3 .github/scripts/validate-vsix.py --version "$VERSION" --all vsix
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: vsix/*.vsix
       - name: Publish to VS Code Marketplace
         id: marketplace
         continue-on-error: true
@@ -206,7 +294,9 @@ jobs:
             echo "| GitHub Release | ${GITHUB_RELEASE_OUTCOME} |";
             echo "";
             echo "## Artifacts";
-            for f in vsix/*.vsix; do echo "- $(basename "$f")"; done;
+            echo '```';
+            (cd vsix && sha256sum ./*.vsix);
+            echo '```';
           } >> "$GITHUB_STEP_SUMMARY"
           if [ "$MARKETPLACE_OUTCOME" = "failure" ]; then
             echo "::warning::VS Code Marketplace publish failed"
