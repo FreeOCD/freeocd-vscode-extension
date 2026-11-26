@@ -40,13 +40,19 @@ jobs:
         run: npm run lint:targets
 
   build-and-test:
-    name: Build & test (${{ matrix.os }}, Node ${{ matrix.node-version }})
+    name: Build & test (${{ matrix.platform }}, Node ${{ matrix.node-version }})
     needs: lint
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-26.04, macos-26, windows-2025]
+        # Check names use the platform label so required status checks keep
+        # working when runner images are bumped.
+        platform: [linux, macos, windows]
         node-version: [22]
+        include:
+          - { platform: linux, os: ubuntu-26.04 }
+          - { platform: macos, os: macos-26 }
+          - { platform: windows, os: windows-2025 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:

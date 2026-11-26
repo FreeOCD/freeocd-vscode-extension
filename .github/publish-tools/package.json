@@ -1,0 +1,9 @@
+{
+  "name": "freeocd-publish-tools",
+  "private": true,
+  "description": "Locked toolchain used by the release workflow to package and publish VSIX files.",
+  "dependencies": {
+    "@vscode/vsce": "4.1.1",
+    "ovsx": "1.4.0"
+  }
+}
