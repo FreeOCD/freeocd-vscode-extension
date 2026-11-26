@@ -13,8 +13,13 @@ const extensionsDir = join(baseTestDataDir, 'extensions');
 mkdirSync(userDataDir, { recursive: true });
 mkdirSync(extensionsDir, { recursive: true });
 
+// Pinned so test runs are reproducible and the CI download cache key is
+// stable. Keep it >= engines.vscode in package.json.
+export const VSCODE_TEST_VERSION = '1.147.0';
+
 export default defineConfig({
   files: 'out/test/**/*.test.js',
+  version: VSCODE_TEST_VERSION,
   extensionDevelopmentPath: import.meta.dirname,
   launchArgs: [
     `--user-data-dir=${userDataDir}`,
