@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defineConfig } from '@vscode/test-cli';
@@ -14,8 +14,15 @@ mkdirSync(userDataDir, { recursive: true });
 mkdirSync(extensionsDir, { recursive: true });
 
 // Pinned so test runs are reproducible and the CI download cache key is
-// stable. Keep it >= engines.vscode in package.json.
+// stable. Must satisfy engines.vscode in package.json (checked below).
 export const VSCODE_TEST_VERSION = '1.147.0';
+
+const { engines } = JSON.parse(readFileSync(join(import.meta.dirname, 'package.json'), 'utf8'));
+const [min, pin] = [engines.vscode.replace(/^\^/, ''), VSCODE_TEST_VERSION].map((v) => v.split('.').map(Number));
+const cmp = pin.map((n, i) => n - min[i]).find((d) => d !== 0) ?? 0;
+if (pin[0] !== min[0] || cmp < 0) {
+  throw new Error(`VSCODE_TEST_VERSION ${VSCODE_TEST_VERSION} does not satisfy engines.vscode ${engines.vscode}`);
+}
 
 export default defineConfig({
   files: 'out/test/**/*.test.js',
