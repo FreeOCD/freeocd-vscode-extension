@@ -6,7 +6,7 @@ recipes.
 
 ## Prerequisites
 
-- **Node.js 22.x** (LTS recommended). Node 20 is also supported by CI.
+- **Node.js 26.x** (active LTS; CI and release builds use Node 26).
 - **VS Code 1.101+** (or Windsurf Next 1.110+, Cursor on a comparable base,
   Cline on top of VS Code).
 - **Git** with submodule support (`git clone --recurse-submodules`).

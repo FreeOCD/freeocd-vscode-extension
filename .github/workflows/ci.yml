@@ -27,7 +27,7 @@ jobs:
           submodules: recursive
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 22
+          node-version: 26
           check-latest: true
           cache: npm
       - name: Install deps
@@ -48,7 +48,7 @@ jobs:
         # Check names use the platform label so required status checks keep
         # working when runner images are bumped.
         platform: [linux, macos, windows]
-        node-version: [22]
+        node-version: [26]
         include:
           - { platform: linux, os: ubuntu-26.04 }
           - { platform: macos, os: macos-26 }
@@ -82,6 +82,11 @@ jobs:
           node -e "const h=require('node-hid'); console.log('node-hid loaded, HID devices count=', h.devices().length)"
       - name: Webpack build (production)
         run: npm run compile
+      - name: Cache VS Code test binary
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .vscode-test
+          key: vscode-test-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.vscode-test.mjs') }}
       - name: Run extension tests
         if: runner.os == 'Linux'
         run: xvfb-run -a npm test
