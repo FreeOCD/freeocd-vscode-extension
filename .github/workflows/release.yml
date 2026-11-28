@@ -114,8 +114,11 @@ jobs:
           node -e "const h=require('node-hid'); console.log('node-hid loaded, HID devices count=', h.devices().length)"
       - name: Webpack build
         run: npm run compile
+      - name: Install locked packaging tools
+        run: npm ci --ignore-scripts --prefix .github/publish-tools
       - name: Package VSIX (${{ matrix.target }})
-        run: npx --yes @vscode/vsce@4 package --target ${{ matrix.target }} --ignoreFile .vscodeignore-${{ matrix.target }} --out freeocd-extension-${{ matrix.target }}.vsix
+        shell: bash
+        run: .github/publish-tools/node_modules/.bin/vsce package --target ${{ matrix.target }} --ignoreFile .vscodeignore-${{ matrix.target }} --out freeocd-extension-${{ matrix.target }}.vsix
       - name: Upload VSIX artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -139,8 +142,8 @@ jobs:
           node-version: 22
           check-latest: true
           package-manager-cache: false
-      - name: Install publishers
-        run: npm install -g @vscode/vsce@4 ovsx@1
+      - name: Install locked publishers
+        run: npm ci --ignore-scripts --prefix .github/publish-tools
       - name: Download all VSIX artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -158,8 +161,8 @@ jobs:
           failed=0
           for file in vsix/*.vsix; do
             echo "Publishing $file to Marketplace..."
-            if ! vsce publish --packagePath "$file"; then
-              echo "Marketplace publish failed for $file"
+            if ! .github/publish-tools/node_modules/.bin/vsce publish --packagePath "$file" --skip-duplicate; then
+              echo "::warning::Marketplace publish failed for $file"
               failed=1
             fi
           done
@@ -173,29 +176,41 @@ jobs:
           failed=0
           for file in vsix/*.vsix; do
             echo "Publishing $file to Open VSX..."
-            if ! ovsx publish "$file"; then
-              echo "Open VSX publish failed for $file"
+            if ! .github/publish-tools/node_modules/.bin/ovsx publish "$file" --skip-duplicate; then
+              echo "::warning::Open VSX publish failed for $file"
               failed=1
             fi
           done
           exit "$failed"
       - name: Create GitHub Release
+        id: github-release
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         # zizmor: ignore[superfluous-actions] keeps gh-release for generated notes + file upload UX
         with:
           generate_release_notes: true
           files: vsix/*.vsix
       - name: Publish summary
+        if: ${{ !cancelled() }}
+        env:
+          MARKETPLACE_OUTCOME: ${{ steps.marketplace.outcome }}
+          OPENVSX_OUTCOME: ${{ steps.openvsx.outcome }}
+          GITHUB_RELEASE_OUTCOME: ${{ steps.github-release.outcome }}
         run: |
           {
             echo "# FreeOCD Release Summary";
             echo "";
             echo "| Channel | Result |";
             echo "|---------|--------|";
-            echo "| VS Code Marketplace | ${{ steps.marketplace.outcome }} |";
-            echo "| Open VSX | ${{ steps.openvsx.outcome }} |";
-            echo "| GitHub Release | success |";
+            echo "| VS Code Marketplace | ${MARKETPLACE_OUTCOME} |";
+            echo "| Open VSX | ${OPENVSX_OUTCOME} |";
+            echo "| GitHub Release | ${GITHUB_RELEASE_OUTCOME} |";
             echo "";
             echo "## Artifacts";
             for f in vsix/*.vsix; do echo "- $(basename "$f")"; done;
           } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$MARKETPLACE_OUTCOME" = "failure" ]; then
+            echo "::warning::VS Code Marketplace publish failed"
+          fi
+          if [ "$OPENVSX_OUTCOME" = "failure" ]; then
+            echo "::warning::Open VSX publish failed"
+          fi
