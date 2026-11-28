@@ -3,11 +3,7 @@
 ## Reporting a vulnerability
 
 If you discover a security issue in FreeOCD, **please do not open a public
-GitHub issue**. Instead, report it privately through one of the following
-channels:
-
-1. [GitHub Security Advisories](https://github.com/FreeOCD/freeocd-vscode-extension/security/advisories/new) — preferred.
-2. Email the maintainers (see commit log for current addresses).
+GitHub issue**. Instead, [report it privately on GitHub](https://github.com/FreeOCD/freeocd-vscode-extension/security/advisories/new).
 
 We will acknowledge receipt within 5 business days and aim to publish a fix
 within 30 days, coordinated with a CVE and Security Advisory where
